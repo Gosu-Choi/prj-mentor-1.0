@@ -9,13 +9,30 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:mentor.startTour",
+    "onCommand:mentor.nextStep",
+    "onCommand:mentor.previousStep",
+    "onCommand:mentor.stopTour"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "mentor.helloWorld",
-        "title": "Hello World"
+        "command": "mentor.startTour",
+        "title": "MENTOR: Start Tour"
+      },
+      {
+        "command": "mentor.nextStep",
+        "title": "MENTOR: Next Step"
+      },
+      {
+        "command": "mentor.previousStep",
+        "title": "MENTOR: Previous Step"
+      },
+      {
+        "command": "mentor.stopTour",
+        "title": "MENTOR: Stop Tour"
       }
     ]
   },
@@ -34,15 +51,19 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.108.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.52.0",
-    "eslint": "^9.39.2",
+    "@types/vscode": "^1.108.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.2",
+    "eslint": "^9.39.2",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.52.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "openai": "^6.16.0"
   }
 }
