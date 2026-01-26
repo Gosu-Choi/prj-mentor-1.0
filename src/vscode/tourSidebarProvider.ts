@@ -45,6 +45,10 @@ export class TourSidebarProvider
 				'mentor.clearExplanations'
 			),
 			new TourSidebarItem(
+				'Show Debug Info',
+				'mentor.showDebugInfo'
+			),
+			new TourSidebarItem(
 				state.showBackground
 					? 'Hide Background Tour'
 					: 'Show Background Tour',

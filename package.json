@@ -62,6 +62,10 @@
       {
         "command": "mentor.toggleBackgroundTour",
         "title": "MENTOR: Toggle Background Tour"
+      },
+      {
+        "command": "mentor.showDebugInfo",
+        "title": "MENTOR: Show Debug Info"
       }
     ]
   },

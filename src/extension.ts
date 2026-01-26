@@ -15,6 +15,7 @@ import { MentorGitProvider } from './vscode/mentorGitProvider';
 import { TourSidebarProvider } from './vscode/tourSidebarProvider';
 import { TourUi } from './vscode/tourUi';
 import { BackgroundContextBuilder } from './features/background/backgroundContextBuilder';
+import { DebugInfoService } from './vscode/debugInfo';
 
 export function activate(context: vscode.ExtensionContext) {
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -44,6 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	const tourUi = new TourUi(controller, workspaceRoot, gitProvider);
 	const tourSidebarProvider = new TourSidebarProvider(controller);
+	const debugInfo = new DebugInfoService();
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider(
 			'mentor.tourSidebar',
@@ -191,6 +193,11 @@ export function activate(context: vscode.ExtensionContext) {
 		() => controller.toggleShowBackground()
 	);
 
+	const showDebugCommand = vscode.commands.registerCommand(
+		'mentor.showDebugInfo',
+		() => debugInfo.show(controller.getState())
+	);
+
 	context.subscriptions.push(
 		startCommand,
 		nextCommand,
@@ -199,8 +206,10 @@ export function activate(context: vscode.ExtensionContext) {
 		openSidebarCommand,
 		clearExplanationsCommand,
 		toggleBackgroundCommand,
+		showDebugCommand,
 		tourUi,
-		tourSidebarProvider
+		tourSidebarProvider,
+		debugInfo
 	);
 }
 

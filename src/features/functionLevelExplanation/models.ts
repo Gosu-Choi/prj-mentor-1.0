@@ -10,6 +10,11 @@ export interface ChangeUnit {
 	symbolName?: string;
 	semanticGroupId?: string;
 	backgroundRegions?: CodeRegion[];
+	relatedCalls?: Array<{
+		name: string;
+		qualifiedName?: string;
+		range: LineRange;
+	}>;
 }
 
 export interface CodeRegion {

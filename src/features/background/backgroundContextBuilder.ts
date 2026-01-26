@@ -1,3 +1,4 @@
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import { TreeSitterAnalyzer } from '../ast/treeSitterAnalyzer';
 import {
@@ -31,37 +32,50 @@ export class BackgroundContextBuilder {
 			unitsByFile.set(fileKey, list);
 		}
 
-		for (const [relativePath, fileUnits] of unitsByFile) {
-			let sourceText: string;
+	for (const [relativePath, fileUnits] of unitsByFile) {
+			let headText: string;
+			let revisedText: string;
 			try {
-				sourceText = await getFileContentAtHead(
+				headText = await getFileContentAtHead(
 					this.workspaceRoot,
 					relativePath
+				);
+				revisedText = await fs.readFile(
+					path.join(this.workspaceRoot, relativePath),
+					'utf8'
 				);
 			} catch {
 				continue;
 			}
-			if (!sourceText) {
+			if (!headText || !revisedText) {
 				continue;
 			}
-			const analysis = await this.analyzer.analyzeFile(
+			const headAnalysis = await this.analyzer.analyzeFile(
 				relativePath,
-				sourceText
+				headText
 			);
-			if (!analysis) {
+			const revisedAnalysis = await this.analyzer.analyzeFile(
+				relativePath,
+				revisedText
+			);
+			if (!headAnalysis || !revisedAnalysis) {
 				continue;
 			}
 			for (const unit of fileUnits) {
-				const backgrounds = this.buildBackgroundRegionsForUnit(
+				const { backgrounds, relatedCalls } =
+					this.buildBackgroundRegionsForUnit(
 					unit,
 					relativePath,
-					analysis.functions,
-					analysis.calls,
-					analysis.functionsByName,
-					analysis.functionsByQualifiedName
+					headAnalysis.functions,
+					revisedAnalysis.calls,
+					headAnalysis.functionsByName,
+					headAnalysis.functionsByQualifiedName
 				);
 				if (backgrounds.length > 0) {
 					unit.backgroundRegions = backgrounds;
+				}
+				if (relatedCalls.length > 0) {
+					unit.relatedCalls = relatedCalls;
 				}
 			}
 		}
@@ -74,9 +88,10 @@ export class BackgroundContextBuilder {
 		calls: { name: string; qualifiedName?: string; range: LineRange }[],
 		byName: Map<string, DefinitionLike[]>,
 		byQualified: Map<string, DefinitionLike[]>
-	): CodeRegion[] {
+	): { backgrounds: CodeRegion[]; relatedCalls: typeof calls } {
 		const regions: CodeRegion[] = [];
 
+		const resolvedCalls: typeof calls = [];
 		const relatedCalls = calls.filter(call =>
 			rangesOverlap(call.range, unit.range)
 		);
@@ -87,13 +102,14 @@ export class BackgroundContextBuilder {
 			if (!definition) {
 				continue;
 			}
+			resolvedCalls.push(call);
 			const region = toRegion(relativePath, definition);
 			if (!regions.some(existing => isSameRegion(existing, region))) {
 				regions.push(region);
 			}
 		}
 
-		return regions;
+		return { backgrounds: regions, relatedCalls: resolvedCalls };
 	}
 }
 
