@@ -17,6 +17,23 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mentor",
+          "title": "MENTOR",
+          "icon": "resources/mentor.svg"
+        }
+      ]
+    },
+    "views": {
+      "mentor": [
+        {
+          "id": "mentor.tourSidebar",
+          "name": "Tour"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "mentor.startTour",
@@ -33,6 +50,14 @@
       {
         "command": "mentor.stopTour",
         "title": "MENTOR: Stop Tour"
+      },
+      {
+        "command": "mentor.openSidebar",
+        "title": "MENTOR: Open Sidebar"
+      },
+      {
+        "command": "mentor.clearExplanations",
+        "title": "MENTOR: Clear Explanations"
       }
     ]
   },

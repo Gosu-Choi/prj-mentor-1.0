@@ -8,9 +8,11 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 import OpenAI from 'openai';
 import { ExplanationGenerator } from './core/explanationGenerator';
+import { buildStepKey, ExplanationStore } from './core/explanationStore';
 import { buildTourSteps, buildTourStepsWithExplanations } from './core/tourBuilder';
 import { TourController } from './core/tourController';
 import { MentorGitProvider } from './vscode/mentorGitProvider';
+import { TourSidebarProvider } from './vscode/tourSidebarProvider';
 import { TourUi } from './vscode/tourUi';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -25,6 +27,10 @@ export function activate(context: vscode.ExtensionContext) {
 	dotenv.config({ path: path.join(workspaceRoot.fsPath, '.env') });
 
 	const controller = new TourController();
+	const explanationStore = new ExplanationStore(
+		workspaceRoot.fsPath,
+		context
+	);
 	const gitProvider = new MentorGitProvider(workspaceRoot);
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(
@@ -33,6 +39,13 @@ export function activate(context: vscode.ExtensionContext) {
 		)
 	);
 	const tourUi = new TourUi(controller, workspaceRoot, gitProvider);
+	const tourSidebarProvider = new TourSidebarProvider(controller);
+	context.subscriptions.push(
+		vscode.window.registerTreeDataProvider(
+			'mentor.tourSidebar',
+			tourSidebarProvider
+		)
+	);
 
 	const startCommand = vscode.commands.registerCommand(
 		'mentor.startTour',
@@ -62,6 +75,20 @@ export function activate(context: vscode.ExtensionContext) {
 				const groups = groupChangeUnits(changeUnits, {
 					workspaceRoot: workspaceRoot.fsPath,
 				});
+
+				const stored = await explanationStore.load();
+				if (stored.size > 0) {
+					const steps = buildTourSteps(groups);
+					for (const step of steps) {
+						const record = stored.get(buildStepKey(step));
+						if (record) {
+							step.explanation = record.explanation;
+						}
+					}
+					controller.setSteps(steps);
+					controller.start();
+					return;
+				}
 
 				const steps = await vscode.window.withProgress(
 					{
@@ -106,6 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 				);
 
+				await explanationStore.save(steps);
 				controller.setSteps(steps);
 				controller.start();
 			} catch (error) {
@@ -133,12 +161,34 @@ export function activate(context: vscode.ExtensionContext) {
 		() => controller.stop()
 	);
 
+	const openSidebarCommand = vscode.commands.registerCommand(
+		'mentor.openSidebar',
+		() => vscode.commands.executeCommand('workbench.view.extension.mentor')
+	);
+
+	const clearExplanationsCommand = vscode.commands.registerCommand(
+		'mentor.clearExplanations',
+		async () => {
+			await explanationStore.clear();
+			controller.updateExplanations(
+				new Map(),
+				'Explanation cleared.'
+			);
+			void vscode.window.showInformationMessage(
+				'MENTOR explanations cleared.'
+			);
+		}
+	);
+
 	context.subscriptions.push(
 		startCommand,
 		nextCommand,
 		previousCommand,
 		stopCommand,
-		tourUi
+		openSidebarCommand,
+		clearExplanationsCommand,
+		tourUi,
+		tourSidebarProvider
 	);
 }
 

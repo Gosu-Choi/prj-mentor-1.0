@@ -116,6 +116,9 @@ export class TourUi implements vscode.Disposable {
 			range,
 			[comment]
 		);
+		this.activeThread.collapsibleState =
+			vscode.CommentThreadCollapsibleState.Expanded;
+		void vscode.commands.executeCommand('comments.focus');
 	}
 
 	private clearCommentThread(): void {

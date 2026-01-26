@@ -15,6 +15,17 @@ export class TourController {
 		this.emit();
 	}
 
+	updateExplanations(
+		explanations: Map<string, string>,
+		placeholder: string
+	): void {
+		for (const step of this.steps) {
+			const key = `${step.type}|${step.target.filePath}|${step.target.range.startLine}-${step.target.range.endLine}`;
+			step.explanation = explanations.get(key) ?? placeholder;
+		}
+		this.emit();
+	}
+
 	start(): void {
 		if (this.steps.length === 0) {
 			this.status = 'completed';
