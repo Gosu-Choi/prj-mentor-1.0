@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { TourController } from '../core/tourController';
-import { TourStep } from '../core/models';
+import { TourController } from '../features/tour/tourController';
+import { TourStep } from '../features/functionLevelExplanation/models';
 
 export class TourSidebarProvider
 	implements vscode.TreeDataProvider<TourSidebarItem>, vscode.Disposable

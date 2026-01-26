@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { getFileContentAtHead } from '../core/gitShow';
+import { getFileContentAtHead } from '../features/functionLevelExplanation/gitShow';
 
 export class MentorGitProvider implements vscode.TextDocumentContentProvider {
 	private readonly _onDidChange =

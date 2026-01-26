@@ -1,4 +1,4 @@
-import { TourState, TourStep } from './models';
+import { TourState, TourStep } from '../functionLevelExplanation/models';
 
 type Listener = (state: TourState) => void;
 

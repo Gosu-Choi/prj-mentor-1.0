@@ -1,5 +1,5 @@
-import { ExplanationGenerator } from './explanationGenerator';
-import { ChangeUnitGroup, CodeRegion, TourStep } from './models';
+import { ExplanationGenerator } from '../functionLevelExplanation/explanationGenerator';
+import { ChangeUnitGroup, CodeRegion, TourStep } from '../functionLevelExplanation/models';
 
 export function buildTourSteps(groups: ChangeUnitGroup[]): TourStep[] {
 	const backgroundSteps: TourStep[] = [];

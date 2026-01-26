@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ChangeUnit, CodeRegion, TourStep } from '../core/models';
-import { TourController } from '../core/tourController';
+import { ChangeUnit, CodeRegion, TourStep } from '../features/functionLevelExplanation/models';
+import { TourController } from '../features/tour/tourController';
 import { MentorGitProvider } from './mentorGitProvider';
 
 export class TourUi implements vscode.Disposable {

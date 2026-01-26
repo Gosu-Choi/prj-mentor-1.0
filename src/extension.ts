@@ -1,16 +1,16 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import { parseChangeUnitsFromDiff } from './core/changeUnits';
-import { getGitDiffAgainstHead } from './core/gitDiff';
-import { groupChangeUnits } from './core/grouping';
+import { parseChangeUnitsFromDiff } from './features/functionLevelExplanation/changeUnits';
+import { getGitDiffAgainstHead } from './features/functionLevelExplanation/gitDiff';
+import { groupChangeUnits } from './features/functionLevelExplanation/grouping';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import OpenAI from 'openai';
-import { ExplanationGenerator } from './core/explanationGenerator';
-import { buildStepKey, ExplanationStore } from './core/explanationStore';
-import { buildTourSteps, buildTourStepsWithExplanations } from './core/tourBuilder';
-import { TourController } from './core/tourController';
+import { ExplanationGenerator } from './features/functionLevelExplanation/explanationGenerator';
+import { buildStepKey, ExplanationStore } from './features/functionLevelExplanation/explanationStore';
+import { buildTourSteps, buildTourStepsWithExplanations } from './features/tour/tourBuilder';
+import { TourController } from './features/tour/tourController';
 import { MentorGitProvider } from './vscode/mentorGitProvider';
 import { TourSidebarProvider } from './vscode/tourSidebarProvider';
 import { TourUi } from './vscode/tourUi';
