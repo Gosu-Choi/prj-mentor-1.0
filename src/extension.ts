@@ -14,6 +14,7 @@ import { TourController } from './features/tour/tourController';
 import { MentorGitProvider } from './vscode/mentorGitProvider';
 import { TourSidebarProvider } from './vscode/tourSidebarProvider';
 import { TourUi } from './vscode/tourUi';
+import { BackgroundContextBuilder } from './features/background/backgroundContextBuilder';
 
 export function activate(context: vscode.ExtensionContext) {
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -32,6 +33,9 @@ export function activate(context: vscode.ExtensionContext) {
 		context
 	);
 	const gitProvider = new MentorGitProvider(workspaceRoot);
+	const backgroundBuilder = new BackgroundContextBuilder(
+		workspaceRoot.fsPath
+	);
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(
 			'mentor-git',
@@ -71,6 +75,8 @@ export function activate(context: vscode.ExtensionContext) {
 					);
 					return;
 				}
+
+				await backgroundBuilder.attachBackgroundRegions(changeUnits);
 
 				const groups = groupChangeUnits(changeUnits, {
 					workspaceRoot: workspaceRoot.fsPath,

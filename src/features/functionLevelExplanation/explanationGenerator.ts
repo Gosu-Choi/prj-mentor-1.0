@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { ChangeUnit } from './models';
+import { ChangeUnit, CodeRegion } from './models';
 import { FileContext, getFileContext } from './fileContext';
 
 export interface ExplanationGeneratorOptions {
@@ -51,7 +51,8 @@ export class ExplanationGenerator {
 
 	async generateBackgroundExplanation(
 		unit: ChangeUnit,
-		mainExplanation: string
+		mainExplanation: string,
+		region: { range: { startLine: number; endLine: number }; label?: string }
 	): Promise<string> {
 		const changeType = classifyChange(unit.diffText);
 		const changeGuidance = backgroundGuidanceFor(changeType);
@@ -65,10 +66,36 @@ export class ExplanationGenerator {
 			'If something is unclear, state that explicitly.',
 			'',
 			`FILE: ${unit.filePath}`,
-			`SYMBOL: ${unit.symbolName ?? 'unknown'}`,
-			`RANGE: ${unit.range.startLine}-${unit.range.endLine}`,
+			`SYMBOL: ${region.label ?? unit.symbolName ?? 'unknown'}`,
+			`RANGE: ${region.range.startLine}-${region.range.endLine}`,
 			'MAIN CHANGE EXPLANATION:',
 			mainExplanation,
+			'',
+			'ORIGINAL FILE (HEAD):',
+			truncate(context.originalText, this.options.maxFileContextChars),
+		].join('\n');
+
+		const response = await this.client.responses.create({
+			model: this.options.model,
+			input,
+		});
+
+		return response.output_text.trim();
+	}
+
+	async generateBackgroundForRegion(
+		region: CodeRegion
+	): Promise<string> {
+		const context = await this.getContext(region.filePath);
+		const input = [
+			'You are providing background context for a helper function.',
+			'Explain what this function does in the ORIGINAL code only.',
+			'Use 2-4 concise sentences. Plain text only; no markdown.',
+			'If something is unclear, state that explicitly.',
+			'',
+			`FILE: ${region.filePath}`,
+			`SYMBOL: ${region.label ?? 'unknown'}`,
+			`RANGE: ${region.range.startLine}-${region.range.endLine}`,
 			'',
 			'ORIGINAL FILE (HEAD):',
 			truncate(context.originalText, this.options.maxFileContextChars),

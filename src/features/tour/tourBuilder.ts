@@ -1,113 +1,29 @@
 import { ExplanationGenerator } from '../functionLevelExplanation/explanationGenerator';
-import { ChangeUnitGroup, CodeRegion, TourStep } from '../functionLevelExplanation/models';
+import {
+	ChangeUnitGroup,
+	CodeRegion,
+	TourStep,
+} from '../functionLevelExplanation/models';
 
 export function buildTourSteps(groups: ChangeUnitGroup[]): TourStep[] {
-	const backgroundSteps: TourStep[] = [];
-	const mainSteps: TourStep[] = [];
-	let stepIndex = 0;
-
-	for (const group of groups) {
-		for (const unit of group.units) {
-			stepIndex += 1;
-			const backgroundStep: TourStep = {
-				id: `bg-${stepIndex}`,
-				type: 'background',
-				target: toCodeRegion(unit),
-				// GPT-based explanation generation will be plugged in here later.
-				explanation: 'Background context placeholder.',
-			};
-
-			const mainStep: TourStep = {
-				id: `main-${stepIndex}`,
-				type: 'main',
-				target: unit,
-				// GPT-based explanation generation will be plugged in here later.
-				explanation: 'Main change explanation placeholder.',
-				dependsOn: [backgroundStep],
-			};
-
-			backgroundSteps.push(backgroundStep);
-			mainSteps.push(mainStep);
-		}
-	}
-
-	const orderedMainSteps = reorderMainSteps(mainSteps);
-	const orderedBackgroundSteps = orderedMainSteps.map(step => {
-		const background = step.dependsOn?.[0];
-		return background ?? {
-			id: `bg-orphan-${step.id}`,
-			type: 'background' as const,
-			target: toCodeRegion(step.target as { filePath: string; range: { startLine: number; endLine: number } }),
-			explanation: 'Background context placeholder.',
-		};
-	});
-
-	return [...orderedBackgroundSteps, ...orderedMainSteps];
+	const mainSteps = buildMainSteps(groups);
+	const backgroundSteps = buildBackgroundStepsForTour(
+		mainSteps,
+		() => 'Background context placeholder.'
+	);
+	return [...backgroundSteps, ...mainSteps];
 }
 
 export async function buildTourStepsWithExplanations(
 	groups: ChangeUnitGroup[],
 	generator: ExplanationGenerator
 ): Promise<TourStep[]> {
-	const backgroundSteps: TourStep[] = [];
-	const mainSteps: TourStep[] = [];
-	let stepIndex = 0;
-
-	for (const group of groups) {
-		for (const unit of group.units) {
-			stepIndex += 1;
-			const mainExplanation = await generator.generateMainExplanation(
-				unit
-			);
-			const backgroundExplanation =
-				await generator.generateBackgroundExplanation(
-					unit,
-					mainExplanation
-				);
-
-			const backgroundStep: TourStep = {
-				id: `bg-${stepIndex}`,
-				type: 'background',
-				target: toCodeRegion(unit),
-				explanation: backgroundExplanation,
-			};
-
-			const mainStep: TourStep = {
-				id: `main-${stepIndex}`,
-				type: 'main',
-				target: unit,
-				explanation: mainExplanation,
-				dependsOn: [backgroundStep],
-			};
-
-			backgroundSteps.push(backgroundStep);
-			mainSteps.push(mainStep);
-		}
-	}
-
-	const orderedMainSteps = reorderMainSteps(mainSteps);
-	const orderedBackgroundSteps = orderedMainSteps.map(step => {
-		const background = step.dependsOn?.[0];
-		return background ?? {
-			id: `bg-orphan-${step.id}`,
-			type: 'background' as const,
-			target: toCodeRegion(step.target as { filePath: string; range: { startLine: number; endLine: number } }),
-			explanation: 'Background context placeholder.',
-		};
-	});
-
-	return [...orderedBackgroundSteps, ...orderedMainSteps];
-}
-
-function toCodeRegion(unit: {
-	filePath: string;
-	range: { startLine: number; endLine: number };
-}): CodeRegion {
-	return {
-		filePath: unit.filePath,
-		range: { ...unit.range },
-		label: 'Background context',
-	};
+	const mainSteps = await buildMainStepsAsync(groups, generator);
+	const backgroundSteps = await buildBackgroundStepsForTourAsync(
+		mainSteps,
+		region => generator.generateBackgroundForRegion(region)
+	);
+	return [...backgroundSteps, ...mainSteps];
 }
 
 function reorderMainSteps(steps: TourStep[]): TourStep[] {
@@ -154,4 +70,129 @@ function detectDefinitionChange(diffText: string): boolean {
 		}
 	}
 	return false;
+}
+
+function buildMainSteps(groups: ChangeUnitGroup[]): TourStep[] {
+	const mainSteps: TourStep[] = [];
+	let stepIndex = 0;
+
+	for (const group of groups) {
+		for (const unit of group.units) {
+			stepIndex += 1;
+			const mainStep: TourStep = {
+				id: `main-${stepIndex}`,
+				type: 'main',
+				target: unit,
+				explanation: 'Main change explanation placeholder.',
+			};
+			mainSteps.push(mainStep);
+		}
+	}
+
+	return mainSteps;
+}
+
+async function buildMainStepsAsync(
+	groups: ChangeUnitGroup[],
+	generator: ExplanationGenerator
+): Promise<TourStep[]> {
+	const mainSteps: TourStep[] = [];
+	let stepIndex = 0;
+
+	for (const group of groups) {
+		for (const unit of group.units) {
+			stepIndex += 1;
+			const mainExplanation =
+				await generator.generateMainExplanation(unit);
+			const mainStep: TourStep = {
+				id: `main-${stepIndex}`,
+				type: 'main',
+				target: unit,
+				explanation: mainExplanation,
+			};
+			mainSteps.push(mainStep);
+		}
+	}
+
+	return mainSteps;
+}
+
+function getBackgroundRegions(
+	unit: ChangeUnitGroup['units'][number]
+): CodeRegion[] {
+	if (unit.backgroundRegions?.length) {
+		return unit.backgroundRegions;
+	}
+	return [];
+}
+
+function buildBackgroundStepsForTour(
+	mainSteps: TourStep[],
+	getExplanation: (region: CodeRegion) => string
+): TourStep[] {
+	const { orderedMainSteps, regionSteps } =
+		collectBackgroundSteps(mainSteps);
+	for (const entry of regionSteps) {
+		entry.step.explanation = getExplanation(entry.step.target as CodeRegion);
+	}
+	return [
+		...orderedMainSteps.flatMap(step => step.dependsOn ?? []),
+		...orderedMainSteps,
+	];
+}
+
+async function buildBackgroundStepsForTourAsync(
+	mainSteps: TourStep[],
+	getExplanation: (region: CodeRegion) => Promise<string>
+): Promise<TourStep[]> {
+	const { orderedMainSteps, regionSteps } =
+		collectBackgroundSteps(mainSteps);
+	for (const entry of regionSteps) {
+		entry.step.explanation = await getExplanation(
+			entry.step.target as CodeRegion
+		);
+	}
+	return [
+		...orderedMainSteps.flatMap(step => step.dependsOn ?? []),
+		...orderedMainSteps,
+	];
+}
+
+function collectBackgroundSteps(mainSteps: TourStep[]): {
+	orderedMainSteps: TourStep[];
+	regionSteps: Array<{ key: string; step: TourStep }>;
+} {
+	const orderedMainSteps = reorderMainSteps(mainSteps);
+	const regionSteps: Array<{ key: string; step: TourStep }> = [];
+	const regionByKey = new Map<string, TourStep>();
+	for (const main of orderedMainSteps) {
+		const target = main.target as {
+			backgroundRegions?: CodeRegion[];
+		};
+		const regions = target.backgroundRegions ?? [];
+		const dependencies: TourStep[] = [];
+		for (const region of regions) {
+			const key = buildRegionKey(region);
+			let step = regionByKey.get(key);
+			if (!step) {
+				step = {
+					id: `bg-${regionSteps.length + 1}`,
+					type: 'background',
+					target: region,
+					explanation: '',
+				};
+				regionByKey.set(key, step);
+				regionSteps.push({ key, step });
+			}
+			dependencies.push(step);
+		}
+		if (dependencies.length > 0) {
+			main.dependsOn = dependencies;
+		}
+	}
+	return { orderedMainSteps, regionSteps };
+}
+
+function buildRegionKey(region: CodeRegion): string {
+	return `${region.filePath}|${region.range.startLine}-${region.range.endLine}`;
 }

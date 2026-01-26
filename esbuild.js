@@ -2,6 +2,11 @@ const esbuild = require("esbuild");
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+const externalDeps = [
+	'vscode',
+	'web-tree-sitter',
+	'@vscode/tree-sitter-wasm',
+];
 
 /**
  * @type {import('esbuild').Plugin}
@@ -35,7 +40,7 @@ async function main() {
 		sourcesContent: false,
 		platform: 'node',
 		outfile: 'dist/extension.js',
-		external: ['vscode'],
+		external: externalDeps,
 		logLevel: 'silent',
 		plugins: [
 			/* add to the end of plugins array */

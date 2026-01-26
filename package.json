@@ -92,7 +92,9 @@
     "typescript-eslint": "^8.52.0"
   },
   "dependencies": {
+    "@vscode/tree-sitter-wasm": "^0.3.0",
     "dotenv": "^17.2.3",
-    "openai": "^6.16.0"
+    "openai": "^6.16.0",
+    "web-tree-sitter": "^0.26.3"
   }
 }

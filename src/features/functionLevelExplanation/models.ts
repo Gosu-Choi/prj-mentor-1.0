@@ -9,6 +9,7 @@ export interface ChangeUnit {
 	diffText: string;
 	symbolName?: string;
 	semanticGroupId?: string;
+	backgroundRegions?: CodeRegion[];
 }
 
 export interface CodeRegion {
