@@ -17,10 +17,14 @@ export class ExplanationGenerator {
 	) {}
 
 	async generateMainExplanation(unit: ChangeUnit): Promise<string> {
+		const changeType = classifyChange(unit.diffText);
+		const changeGuidance = mainGuidanceFor(changeType);
 		const context = await this.getContext(unit.filePath);
 		const input = [
 			'You are explaining code changes to a developer.',
-			'Focus only on the change and its effect.',
+			'Focus on how the role/behavior of the enclosing function or block changed.',
+			changeGuidance,
+			'If this change introduces or starts using a new function, explain that function’s role in the change.',
 			'Use 2-4 concise sentences. Plain text only; no markdown.',
 			'If something is unclear, state that explicitly.',
 			'',
@@ -49,10 +53,14 @@ export class ExplanationGenerator {
 		unit: ChangeUnit,
 		mainExplanation: string
 	): Promise<string> {
+		const changeType = classifyChange(unit.diffText);
+		const changeGuidance = backgroundGuidanceFor(changeType);
 		const context = await this.getContext(unit.filePath);
 		const input = [
 			'You are providing background context needed to understand a code change.',
+			'Only include the minimal API/function context required to understand the main explanation.',
 			'Focus on pre-existing behavior and structure in the ORIGINAL code.',
+			changeGuidance,
 			'Use 2-4 concise sentences. Plain text only; no markdown.',
 			'If something is unclear, state that explicitly.',
 			'',
@@ -82,6 +90,59 @@ export class ExplanationGenerator {
 		const context = await getFileContext(this.workspaceRoot, filePath);
 		this.cache.set(filePath, context);
 		return context;
+	}
+}
+
+type ChangeType = 'add' | 'remove' | 'modify' | 'unknown';
+
+function classifyChange(diffText: string): ChangeType {
+	let hasAdd = false;
+	let hasRemove = false;
+	for (const line of diffText.split(/\r?\n/)) {
+		if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) {
+			continue;
+		}
+		if (line.startsWith('+')) {
+			hasAdd = true;
+		} else if (line.startsWith('-')) {
+			hasRemove = true;
+		}
+	}
+	if (hasAdd && hasRemove) {
+		return 'modify';
+	}
+	if (hasAdd) {
+		return 'add';
+	}
+	if (hasRemove) {
+		return 'remove';
+	}
+	return 'unknown';
+}
+
+function mainGuidanceFor(changeType: ChangeType): string {
+	switch (changeType) {
+		case 'modify':
+			return 'Explain how the behavior/role changed and why the revision might be needed.';
+		case 'remove':
+			return 'Explain what the removed code used to do and why it is now unnecessary.';
+		case 'add':
+			return 'Explain why the new code is needed relative to the original behavior. If there is addition which is similar to surrounding code, for example, introducing a new branch or conditional, then compare the meaning of the existing code (branch/path) with the new one.';
+		default:
+			return 'Explain the most likely intent and impact of the change.';
+	}
+}
+
+function backgroundGuidanceFor(changeType: ChangeType): string {
+	switch (changeType) {
+		case 'modify':
+			return 'Explain only the prior APIs or helper functions that the change relies on.';
+		case 'remove':
+			return 'Explain only the prior APIs or helpers that the removed code depended on.';
+		case 'add':
+			return 'Explain only the existing APIs or helpers the new code is intended to integrate with.';
+		default:
+			return 'Explain only the most relevant existing APIs/functions.';
 	}
 }
 

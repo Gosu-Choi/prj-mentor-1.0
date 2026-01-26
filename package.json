@@ -58,6 +58,10 @@
       {
         "command": "mentor.clearExplanations",
         "title": "MENTOR: Clear Explanations"
+      },
+      {
+        "command": "mentor.toggleBackgroundTour",
+        "title": "MENTOR: Toggle Background Tour"
       }
     ]
   },

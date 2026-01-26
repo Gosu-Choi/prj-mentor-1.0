@@ -43,12 +43,29 @@ export class TourSidebarProvider
 			new TourSidebarItem(
 				'Clear Explanations',
 				'mentor.clearExplanations'
+			),
+			new TourSidebarItem(
+				state.showBackground
+					? 'Hide Background Tour'
+					: 'Show Background Tour',
+				'mentor.toggleBackgroundTour'
 			)
 		);
 
 		items.push(new TourSidebarItem(''));
 		items.push(
-			new TourSidebarItem(`Status: ${state.status}`, undefined, true)
+			new TourSidebarItem(
+				`Status: ${state.status}`,
+				undefined,
+				true
+			)
+		);
+		items.push(
+			new TourSidebarItem(
+				`Background: ${state.showBackground ? 'on' : 'off'}`,
+				undefined,
+				true
+			)
 		);
 
 		if (step) {

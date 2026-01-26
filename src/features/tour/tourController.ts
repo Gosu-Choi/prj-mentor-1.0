@@ -6,6 +6,7 @@ export class TourController {
 	private steps: TourStep[] = [];
 	private currentIndex = -1;
 	private status: TourState['status'] = 'idle';
+	private showBackground = true;
 	private listeners = new Set<Listener>();
 
 	setSteps(steps: TourStep[]): void {
@@ -34,7 +35,7 @@ export class TourController {
 			return;
 		}
 		this.status = 'running';
-		this.currentIndex = 0;
+		this.currentIndex = this.findNextIndex(-1, 1);
 		this.emit();
 	}
 
@@ -42,12 +43,13 @@ export class TourController {
 		if (this.status !== 'running') {
 			return;
 		}
-		if (this.currentIndex + 1 >= this.steps.length) {
+		const nextIndex = this.findNextIndex(this.currentIndex, 1);
+		if (nextIndex < 0) {
 			this.status = 'completed';
 			this.emit();
 			return;
 		}
-		this.currentIndex += 1;
+		this.currentIndex = nextIndex;
 		this.emit();
 	}
 
@@ -55,12 +57,12 @@ export class TourController {
 		if (this.status !== 'running') {
 			return;
 		}
-		if (this.currentIndex <= 0) {
-			this.currentIndex = 0;
-			this.emit();
-			return;
+		const prevIndex = this.findNextIndex(this.currentIndex, -1);
+		if (prevIndex < 0) {
+			this.currentIndex = this.findNextIndex(-1, 1);
+		} else {
+			this.currentIndex = prevIndex;
 		}
-		this.currentIndex -= 1;
 		this.emit();
 	}
 
@@ -75,6 +77,7 @@ export class TourController {
 			steps: this.steps,
 			currentIndex: this.currentIndex,
 			status: this.status,
+			showBackground: this.showBackground,
 		};
 	}
 
@@ -90,6 +93,33 @@ export class TourController {
 		return () => {
 			this.listeners.delete(listener);
 		};
+	}
+
+	setShowBackground(value: boolean): void {
+		this.showBackground = value;
+		if (this.status === 'running') {
+			const current = this.getCurrentStep();
+			if (current && current.type === 'background' && !value) {
+				this.currentIndex = this.findNextIndex(this.currentIndex, 1);
+			}
+		}
+		this.emit();
+	}
+
+	toggleShowBackground(): void {
+		this.setShowBackground(!this.showBackground);
+	}
+
+	private findNextIndex(start: number, direction: 1 | -1): number {
+		let index = start + direction;
+		while (index >= 0 && index < this.steps.length) {
+			const step = this.steps[index];
+			if (this.showBackground || step.type !== 'background') {
+				return index;
+			}
+			index += direction;
+		}
+		return -1;
 	}
 
 	private emit(): void {

@@ -31,7 +31,18 @@ export function buildTourSteps(groups: ChangeUnitGroup[]): TourStep[] {
 		}
 	}
 
-	return [...backgroundSteps, ...mainSteps];
+	const orderedMainSteps = reorderMainSteps(mainSteps);
+	const orderedBackgroundSteps = orderedMainSteps.map(step => {
+		const background = step.dependsOn?.[0];
+		return background ?? {
+			id: `bg-orphan-${step.id}`,
+			type: 'background' as const,
+			target: toCodeRegion(step.target as { filePath: string; range: { startLine: number; endLine: number } }),
+			explanation: 'Background context placeholder.',
+		};
+	});
+
+	return [...orderedBackgroundSteps, ...orderedMainSteps];
 }
 
 export async function buildTourStepsWithExplanations(
@@ -74,7 +85,18 @@ export async function buildTourStepsWithExplanations(
 		}
 	}
 
-	return [...backgroundSteps, ...mainSteps];
+	const orderedMainSteps = reorderMainSteps(mainSteps);
+	const orderedBackgroundSteps = orderedMainSteps.map(step => {
+		const background = step.dependsOn?.[0];
+		return background ?? {
+			id: `bg-orphan-${step.id}`,
+			type: 'background' as const,
+			target: toCodeRegion(step.target as { filePath: string; range: { startLine: number; endLine: number } }),
+			explanation: 'Background context placeholder.',
+		};
+	});
+
+	return [...orderedBackgroundSteps, ...orderedMainSteps];
 }
 
 function toCodeRegion(unit: {
@@ -86,4 +108,50 @@ function toCodeRegion(unit: {
 		range: { ...unit.range },
 		label: 'Background context',
 	};
+}
+
+function reorderMainSteps(steps: TourStep[]): TourStep[] {
+	return [...steps].sort((a, b) => {
+		const aKey = stepOrderingKey(a);
+		const bKey = stepOrderingKey(b);
+		if (aKey.filePath !== bKey.filePath) {
+			return aKey.filePath.localeCompare(bKey.filePath);
+		}
+		if (aKey.definitionRank !== bKey.definitionRank) {
+			return aKey.definitionRank - bKey.definitionRank;
+		}
+		return aKey.startLine - bKey.startLine;
+	});
+}
+
+function stepOrderingKey(step: TourStep): {
+	filePath: string;
+	definitionRank: number;
+	startLine: number;
+} {
+	const target = step.target as { filePath: string; range: { startLine: number; endLine: number }; diffText?: string };
+	const diffText = 'diffText' in target ? target.diffText ?? '' : '';
+	const isDefinition = detectDefinitionChange(diffText);
+	return {
+		filePath: target.filePath,
+		definitionRank: isDefinition ? 1 : 0,
+		startLine: target.range.startLine,
+	};
+}
+
+function detectDefinitionChange(diffText: string): boolean {
+	const addedLines = diffText
+		.split(/\r?\n/)
+		.filter(line => line.startsWith('+') && !line.startsWith('+++'));
+	for (const line of addedLines) {
+		const text = line.slice(1).trim();
+		if (
+			/^(export\s+)?(async\s+)?function\s+\w+/.test(text) ||
+			/^(export\s+)?class\s+\w+/.test(text) ||
+			/^(export\s+)?(const|let|var)\s+\w+\s*=\s*\(?.*?\)?\s*=>/.test(text)
+		) {
+			return true;
+		}
+	}
+	return false;
 }

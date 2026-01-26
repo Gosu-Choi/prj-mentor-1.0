@@ -31,6 +31,7 @@ export interface TourState {
 	steps: TourStep[];
 	currentIndex: number;
 	status: 'idle' | 'running' | 'paused' | 'completed';
+	showBackground: boolean;
 }
 
 export interface ChangeUnitGroup {

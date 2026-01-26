@@ -79,9 +79,11 @@ export function parseChangeUnitsFromDiff(
 
 	flushHunk();
 
-	return units.filter((unit) =>
-		path.isAbsolute(unit.filePath)
+	return units.filter(unit => {
+		const inWorkspace = path.isAbsolute(unit.filePath)
 			? unit.filePath.startsWith(workspaceRoot)
-			: true
-	);
+			: true;
+		const isMarkdown = unit.filePath.toLowerCase().endsWith('.md');
+		return inWorkspace && !isMarkdown;
+	});
 }

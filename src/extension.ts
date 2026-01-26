@@ -180,6 +180,11 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
+	const toggleBackgroundCommand = vscode.commands.registerCommand(
+		'mentor.toggleBackgroundTour',
+		() => controller.toggleShowBackground()
+	);
+
 	context.subscriptions.push(
 		startCommand,
 		nextCommand,
@@ -187,6 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
 		stopCommand,
 		openSidebarCommand,
 		clearExplanationsCommand,
+		toggleBackgroundCommand,
 		tourUi,
 		tourSidebarProvider
 	);
