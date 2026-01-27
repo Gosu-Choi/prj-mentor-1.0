@@ -91,7 +91,6 @@ export class BackgroundContextBuilder {
 	): { backgrounds: CodeRegion[]; relatedCalls: typeof calls } {
 		const regions: CodeRegion[] = [];
 
-		const resolvedCalls: typeof calls = [];
 		const relatedCalls = calls.filter(call =>
 			rangesOverlap(call.range, unit.range)
 		);
@@ -102,14 +101,13 @@ export class BackgroundContextBuilder {
 			if (!definition) {
 				continue;
 			}
-			resolvedCalls.push(call);
 			const region = toRegion(relativePath, definition);
 			if (!regions.some(existing => isSameRegion(existing, region))) {
 				regions.push(region);
 			}
 		}
 
-		return { backgrounds: regions, relatedCalls: resolvedCalls };
+		return { backgrounds: regions, relatedCalls };
 	}
 }
 
