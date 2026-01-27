@@ -28,6 +28,7 @@ export interface FunctionDefinition {
 	name: string;
 	qualifiedName: string;
 	range: LineRange;
+	kind: 'function' | 'method' | 'class';
 }
 
 export interface CallReference {
@@ -173,7 +174,7 @@ class AstVisitor {
 		if (!name) {
 			return;
 		}
-		this.addFunctionDefinition(name, node);
+		this.addFunctionDefinition(name, node, 'function');
 	}
 
 	private recordMethodDefinition(node: TreeSitter.Node): void {
@@ -182,7 +183,7 @@ class AstVisitor {
 		if (!name) {
 			return;
 		}
-		this.addFunctionDefinition(name, node);
+		this.addFunctionDefinition(name, node, 'method');
 	}
 
 	private recordVariableFunction(node: TreeSitter.Node): void {
@@ -195,7 +196,7 @@ class AstVisitor {
 		if (!name) {
 			return;
 		}
-		this.addFunctionDefinition(name, valueNode);
+		this.addFunctionDefinition(name, valueNode, 'function');
 	}
 
 	private recordAssignmentFunction(node: TreeSitter.Node): void {
@@ -212,7 +213,7 @@ class AstVisitor {
 			return;
 		}
 		const name = identifiers[identifiers.length - 1];
-		this.addFunctionDefinition(name, rightNode);
+		this.addFunctionDefinition(name, rightNode, 'function');
 	}
 
 	private recordClassDefinition(node: TreeSitter.Node): void {
@@ -221,7 +222,7 @@ class AstVisitor {
 		if (!name) {
 			return;
 		}
-		this.addFunctionDefinition(name, node);
+		this.addFunctionDefinition(name, node, 'class');
 	}
 
 	private recordCall(node: TreeSitter.Node): void {
@@ -241,7 +242,8 @@ class AstVisitor {
 
 	private addFunctionDefinition(
 		name: string,
-		node: TreeSitter.Node
+		node: TreeSitter.Node,
+		kind: FunctionDefinition['kind']
 	): void {
 		const qualifiedName =
 			this.classStack.length > 0
@@ -252,6 +254,7 @@ class AstVisitor {
 			name,
 			qualifiedName,
 			range,
+			kind,
 		};
 		this.functions.push(def);
 		this.appendToMap(this.functionsByName, name, def);

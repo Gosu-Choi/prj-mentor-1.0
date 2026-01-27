@@ -12,6 +12,7 @@ interface DefinitionLike {
 	name: string;
 	qualifiedName: string;
 	range: LineRange;
+	kind?: 'function' | 'method' | 'class';
 }
 
 export class BackgroundContextBuilder {
@@ -91,6 +92,17 @@ export class BackgroundContextBuilder {
 	): { backgrounds: CodeRegion[]; relatedCalls: typeof calls } {
 		const regions: CodeRegion[] = [];
 
+		const enclosingClass = findEnclosingClass(
+			functions,
+			unit.range.startLine
+		);
+		if (enclosingClass) {
+			const classRegion = toClassRegion(relativePath, enclosingClass);
+			if (!regions.some(existing => isSameRegion(existing, classRegion))) {
+				regions.push(classRegion);
+			}
+		}
+
 		const relatedCalls = calls.filter(call =>
 			rangesOverlap(call.range, unit.range)
 		);
@@ -129,6 +141,18 @@ function toRegion(
 	};
 }
 
+function toClassRegion(
+	filePath: string,
+	definition: DefinitionLike
+): CodeRegion {
+	const startLine = definition.range.startLine;
+	return {
+		filePath,
+		range: { startLine, endLine: startLine },
+		label: definition.qualifiedName,
+	};
+}
+
 function findMatchingDefinition(
 	call: { name: string; qualifiedName?: string },
 	map: Map<string, DefinitionLike[]>
@@ -152,6 +176,25 @@ function isSameRegion(
 		a.range.startLine === b.range.startLine &&
 		a.range.endLine === b.range.endLine
 	);
+}
+
+function findEnclosingClass(
+	definitions: DefinitionLike[],
+	line: number
+): DefinitionLike | undefined {
+	const candidates = definitions.filter(def =>
+		def.kind === 'class' &&
+		def.range.startLine <= line &&
+		def.range.endLine >= line
+	);
+	if (candidates.length === 0) {
+		return undefined;
+	}
+	return candidates.reduce((best, current) => {
+		const bestSpan = best.range.endLine - best.range.startLine;
+		const currentSpan = current.range.endLine - current.range.startLine;
+		return currentSpan < bestSpan ? current : best;
+	});
 }
 
 function normalizeRelativePath(

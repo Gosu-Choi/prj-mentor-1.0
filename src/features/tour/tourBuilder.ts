@@ -472,8 +472,11 @@ function buildBackgroundStepsForTour(
 	for (const entry of regionSteps) {
 		entry.step.explanation = getExplanation(entry.step.target as CodeRegion);
 	}
+	const orderedBackground = orderBackgroundSteps(
+		regionSteps.map(entry => entry.step)
+	);
 	return [
-		...orderedMainSteps.flatMap(step => step.dependsOn ?? []),
+		...orderedBackground,
 		...orderedMainSteps,
 	];
 }
@@ -489,8 +492,11 @@ async function buildBackgroundStepsForTourAsync(
 			entry.step.target as CodeRegion
 		);
 	}
+	const orderedBackground = orderBackgroundSteps(
+		regionSteps.map(entry => entry.step)
+	);
 	return [
-		...orderedMainSteps.flatMap(step => step.dependsOn ?? []),
+		...orderedBackground,
 		...orderedMainSteps,
 	];
 }
@@ -531,5 +537,34 @@ function collectBackgroundSteps(mainSteps: TourStep[]): {
 }
 
 function buildRegionKey(region: CodeRegion): string {
-	return `${region.filePath}|${region.range.startLine}-${region.range.endLine}`;
+	return `${region.filePath}|${region.range.startLine}-${region.range.endLine}|${region.label ?? ''}`;
+}
+
+function orderBackgroundSteps(steps: TourStep[]): TourStep[] {
+	return [...steps].sort((a, b) => {
+		const aTarget = a.target as CodeRegion;
+		const bTarget = b.target as CodeRegion;
+		const aRank = backgroundRank(aTarget.label);
+		const bRank = backgroundRank(bTarget.label);
+		if (aRank !== bRank) {
+			return aRank - bRank;
+		}
+		if (aTarget.filePath !== bTarget.filePath) {
+			return aTarget.filePath.localeCompare(bTarget.filePath);
+		}
+		return aTarget.range.startLine - bTarget.range.startLine;
+	});
+}
+
+function backgroundRank(label?: string): number {
+	if (!label) {
+		return 1;
+	}
+	if (/^[A-Z][A-Za-z0-9_]*$/.test(label)) {
+		return 0;
+	}
+	if (label.includes('.')) {
+		return 1;
+	}
+	return 1;
 }
