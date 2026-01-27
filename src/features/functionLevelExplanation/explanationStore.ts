@@ -18,6 +18,7 @@ interface ExplanationRecord {
 
 interface ExplanationStoreFile {
 	version: number;
+	intent?: string;
 	records: ExplanationRecord[];
 }
 
@@ -27,11 +28,14 @@ export class ExplanationStore {
 		private readonly context: vscode.ExtensionContext
 	) {}
 
-	async load(): Promise<Map<string, ExplanationRecord>> {
+	async load(intent?: string): Promise<Map<string, ExplanationRecord>> {
 		const fromState = this.context.workspaceState.get<
 			ExplanationStoreFile | undefined
 		>('mentor.explanations');
 		if (fromState?.records?.length) {
+			if (intentMismatch(fromState.intent, intent)) {
+				return new Map();
+			}
 			return new Map(fromState.records.map(record => [record.key, record]));
 		}
 
@@ -40,6 +44,9 @@ export class ExplanationStore {
 			const raw = await fs.readFile(filePath, 'utf8');
 			const parsed = JSON.parse(raw) as ExplanationStoreFile;
 			if (parsed?.records?.length) {
+				if (intentMismatch(parsed.intent, intent)) {
+					return new Map();
+				}
 				return new Map(
 					parsed.records.map(record => [record.key, record])
 				);
@@ -51,7 +58,7 @@ export class ExplanationStore {
 		return new Map();
 	}
 
-	async save(steps: TourStep[]): Promise<void> {
+	async save(steps: TourStep[], intent?: string): Promise<void> {
 		const records = steps.map(step => ({
 			key: buildStepKey(step),
 			type: step.type,
@@ -64,6 +71,7 @@ export class ExplanationStore {
 
 		const payload: ExplanationStoreFile = {
 			version: 1,
+			intent: intent?.trim() || undefined,
 			records,
 		};
 
@@ -74,7 +82,7 @@ export class ExplanationStore {
 
 		const filePath = this.getStorePath();
 		await fs.mkdir(path.dirname(filePath), { recursive: true });
-		await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
+	await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
 	}
 
 	async clear(): Promise<void> {
@@ -96,4 +104,13 @@ export function buildStepKey(step: TourStep): string {
 	const filePath = step.target.filePath;
 	const range = step.target.range;
 	return `${step.type}|${filePath}|${range.startLine}-${range.endLine}`;
+}
+
+function intentMismatch(
+	stored: string | undefined,
+	intent: string | undefined
+): boolean {
+	const normalizedStored = stored?.trim() || '';
+	const normalizedIntent = intent?.trim() || '';
+	return normalizedStored !== normalizedIntent;
 }

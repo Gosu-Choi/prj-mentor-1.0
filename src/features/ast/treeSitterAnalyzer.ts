@@ -115,6 +115,7 @@ class AstVisitor {
 		switch (node.type) {
 			case 'class_declaration':
 			case 'class_definition':
+				this.recordClassDefinition(node);
 				this.withClassScope(node, () => {
 					this.visitChildren(node);
 				});
@@ -212,6 +213,15 @@ class AstVisitor {
 		}
 		const name = identifiers[identifiers.length - 1];
 		this.addFunctionDefinition(name, rightNode);
+	}
+
+	private recordClassDefinition(node: TreeSitter.Node): void {
+		const nameNode = getChildByFieldName(node, 'name');
+		const name = nameNode?.text?.trim();
+		if (!name) {
+			return;
+		}
+		this.addFunctionDefinition(name, node);
 	}
 
 	private recordCall(node: TreeSitter.Node): void {
@@ -318,10 +328,12 @@ function getFunctionRange(node: TreeSitter.Node): LineRange {
 		getChildByFieldName(node, 'body') ??
 		getChildByFieldName(node, 'statement') ??
 		getChildByFieldName(node, 'block');
-	if (bodyNode) {
-		return toLineRange(bodyNode);
-	}
-	return toLineRange(node);
+	const startLine = node.startPosition.row + 1;
+	const endLine = (bodyNode ?? node).endPosition.row + 1;
+	return {
+		startLine,
+		endLine,
+	};
 }
 
 function isIdentifierNode(node: TreeSitter.Node): boolean {

@@ -13,7 +13,8 @@
     "onCommand:mentor.startTour",
     "onCommand:mentor.nextStep",
     "onCommand:mentor.previousStep",
-    "onCommand:mentor.stopTour"
+    "onCommand:mentor.stopTour",
+    "onView:mentor.intentView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -28,6 +29,11 @@
     },
     "views": {
       "mentor": [
+        {
+          "id": "mentor.intentView",
+          "name": "Intent",
+          "type": "webview"
+        },
         {
           "id": "mentor.tourSidebar",
           "name": "Tour"

@@ -17,17 +17,30 @@ export class ExplanationGenerator {
 	) {}
 
 	async generateMainExplanation(unit: ChangeUnit): Promise<string> {
+		return this.generateMainExplanationWithIntent(unit);
+	}
+
+	async generateMainExplanationWithIntent(
+		unit: ChangeUnit,
+		intent?: string
+	): Promise<string> {
 		const changeType = classifyChange(unit.diffText);
 		const changeGuidance = mainGuidanceFor(changeType);
 		const context = await this.getContext(unit.filePath);
+		const intentLine = intent?.trim()
+			? `USER INTENT: ${intent.trim()}`
+			: 'USER INTENT: (not provided)';
 		const input = [
 			'You are explaining code changes to a developer.',
+			'Prioritize the user intent when deciding which aspects of the change to emphasize.',
 			'Focus on how the role/behavior of the enclosing function or block changed.',
 			changeGuidance,
-			'If this change introduces or starts using a new function, explain that function’s role in the change.',
+			formatIntroducedDefinitions(unit),
+			'If this change introduces or starts using a new function, explain that function?? role in the change.',
 			'Use 2-4 concise sentences. Plain text only; no markdown.',
 			'If something is unclear, state that explicitly.',
 			'',
+			intentLine,
 			`FILE: ${unit.filePath}`,
 			`SYMBOL: ${unit.symbolName ?? 'unknown'}`,
 			`RANGE: ${unit.range.startLine}-${unit.range.endLine}`,
@@ -182,4 +195,12 @@ function truncate(text: string, maxChars: number): string {
 	return `${text.slice(0, head)}\n... [truncated] ...\n${text.slice(
 		text.length - tail
 	)}`;
+}
+
+function formatIntroducedDefinitions(unit: ChangeUnit): string {
+	if (!unit.introducedDefinitions || unit.introducedDefinitions.length === 0) {
+		return 'New definitions in this change: none.';
+	}
+	const parts = unit.introducedDefinitions.map(def => `${def.name} (${def.type})`);
+	return `New definitions in this change: ${parts.join(', ')}. Include brief context for these in the operational explanation.`;
 }

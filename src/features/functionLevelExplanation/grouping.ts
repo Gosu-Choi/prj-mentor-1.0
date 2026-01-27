@@ -46,6 +46,8 @@ export function groupChangeUnits(
 				if (symbolName) {
 					unit.symbolName = symbolName;
 				}
+			} else if (!unit.symbolName && unit.definitionName) {
+				unit.symbolName = unit.definitionName;
 			}
 		}
 
@@ -57,10 +59,19 @@ export function groupChangeUnits(
 		let currentGroup: ChangeUnitGroup | null = null;
 
 		for (const unit of fileUnits) {
+			const sameKind =
+				currentGroup &&
+				currentGroup.units[0]?.changeKind === unit.changeKind;
+			const sameDefinition =
+				unit.changeKind === 'definition'
+					? currentGroup?.units[0]?.definitionName === unit.definitionName
+					: true;
 			if (
 				currentGroup &&
 				currentGroup.filePath === unit.filePath &&
 				currentGroup.symbolName === unit.symbolName &&
+				sameKind &&
+				sameDefinition &&
 				unit.range.startLine - currentGroup.range.endLine <=
 					proximityThreshold
 			) {

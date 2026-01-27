@@ -66,13 +66,12 @@ export class TourUi implements vscode.Disposable {
 			this.workspaceRoot,
 			target.filePath
 		);
-
 		try {
 			await vscode.commands.executeCommand(
 				'vscode.diff',
 				originalUri,
 				revisedUri,
-				`MENTOR: ${target.filePath}`
+				'MENTOR'
 			);
 
 			const targetUri =
@@ -106,10 +105,11 @@ export class TourUi implements vscode.Disposable {
 				? this.gitProvider.toVirtualUri(target.filePath)
 				: vscode.Uri.joinPath(this.workspaceRoot, target.filePath);
 		const range = toEditorRangeFromLines(target.range);
+		const label = buildCommentLabel(step);
 		const comment: vscode.Comment = {
 			body: step.explanation,
 			mode: vscode.CommentMode.Preview,
-			author: { name: 'MENTOR' },
+			author: { name: label },
 		};
 		this.activeThread = this.commentController.createCommentThread(
 			targetUri,
@@ -136,6 +136,63 @@ function normalizeTarget(target: ChangeUnit | CodeRegion): CodeRegion {
 		};
 	}
 	return target;
+}
+
+function buildDiffTitle(step: TourStep): string {
+	if (step.type === 'background') {
+		const target = normalizeTarget(step.target);
+		const label = target.label ? ` / ${target.label}` : '';
+		return `MENTOR: Background Context${label}`;
+	}
+
+	const target = step.target as ChangeUnit;
+	const changeKind = target.changeKind ?? 'operation';
+	if (changeKind === 'definition') {
+		const name =
+			target.definitionName ??
+			target.symbolName ??
+			'Unnamed';
+		return `MENTOR: Definition Explanation / ${name}`;
+	}
+
+	const summary = summarizeExplanation(step.explanation);
+	return `MENTOR: Operational Change Explanation (${summary})`;
+}
+
+function buildCommentLabel(step: TourStep): string {
+	if (step.type === 'background') {
+		const target = normalizeTarget(step.target);
+		const label = target.label ? ` / ${target.label}` : '';
+		return `MENTOR: Background Context${label}`;
+	}
+
+	const target = step.target as ChangeUnit;
+	const changeKind = target.changeKind ?? 'operation';
+	if (changeKind === 'definition') {
+		const name =
+			target.definitionName ??
+			target.symbolName ??
+			'Unnamed';
+		return `MENTOR: Definition Explanation / ${name}`;
+	}
+
+	return 'MENTOR: Operational Change Explanation';
+}
+
+function summarizeExplanation(explanation: string): string {
+	const trimmed = explanation.trim();
+	if (!trimmed) {
+		return 'Change';
+	}
+	const sentenceMatch = /([^.!?]{1,80}[.!?])/.exec(trimmed);
+	if (sentenceMatch) {
+		return cleanSummary(sentenceMatch[1]);
+	}
+	return cleanSummary(trimmed.slice(0, 80));
+}
+
+function cleanSummary(summary: string): string {
+	return summary.replace(/\s+/g, ' ').trim();
 }
 
 function toEditorRange(

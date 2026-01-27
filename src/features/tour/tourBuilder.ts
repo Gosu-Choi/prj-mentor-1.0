@@ -16,9 +16,10 @@ export function buildTourSteps(groups: ChangeUnitGroup[]): TourStep[] {
 
 export async function buildTourStepsWithExplanations(
 	groups: ChangeUnitGroup[],
-	generator: ExplanationGenerator
+	generator: ExplanationGenerator,
+	intent?: string
 ): Promise<TourStep[]> {
-	const mainSteps = await buildMainStepsAsync(groups, generator);
+	const mainSteps = await buildMainStepsAsync(groups, generator, intent);
 	const steps = await buildBackgroundStepsForTourAsync(
 		mainSteps,
 		region => generator.generateBackgroundForRegion(region)
@@ -47,7 +48,17 @@ function stepOrderingKey(step: TourStep): {
 } {
 	const target = step.target as { filePath: string; range: { startLine: number; endLine: number }; diffText?: string };
 	const diffText = 'diffText' in target ? target.diffText ?? '' : '';
-	const isDefinition = detectDefinitionChange(diffText);
+	const explicitKind =
+		'target' in step && 'changeKind' in (step.target as object)
+			? (step.target as { changeKind?: 'definition' | 'operation' })
+					.changeKind
+			: undefined;
+	const isDefinition =
+		explicitKind === 'definition'
+			? true
+			: explicitKind === 'operation'
+				? false
+				: detectDefinitionChange(diffText);
 	return {
 		filePath: target.filePath,
 		definitionRank: isDefinition ? 1 : 0,
@@ -94,7 +105,8 @@ function buildMainSteps(groups: ChangeUnitGroup[]): TourStep[] {
 
 async function buildMainStepsAsync(
 	groups: ChangeUnitGroup[],
-	generator: ExplanationGenerator
+	generator: ExplanationGenerator,
+	intent?: string
 ): Promise<TourStep[]> {
 	const mainSteps: TourStep[] = [];
 	let stepIndex = 0;
@@ -103,7 +115,10 @@ async function buildMainStepsAsync(
 		for (const unit of group.units) {
 			stepIndex += 1;
 			const mainExplanation =
-				await generator.generateMainExplanation(unit);
+				await generator.generateMainExplanationWithIntent(
+					unit,
+					intent
+				);
 			const mainStep: TourStep = {
 				id: `main-${stepIndex}`,
 				type: 'main',

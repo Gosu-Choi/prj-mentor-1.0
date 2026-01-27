@@ -9,6 +9,14 @@ export interface ChangeUnit {
 	diffText: string;
 	symbolName?: string;
 	semanticGroupId?: string;
+	changeKind?: 'definition' | 'operation';
+	definitionName?: string;
+	definitionType?: string;
+	introducedDefinitions?: Array<{
+		name: string;
+		type: string;
+		range: LineRange;
+	}>;
 	backgroundRegions?: CodeRegion[];
 	relatedCalls?: Array<{
 		name: string;
