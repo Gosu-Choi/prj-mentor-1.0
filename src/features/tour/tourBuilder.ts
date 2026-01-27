@@ -30,11 +30,11 @@ function reorderMainSteps(steps: TourStep[]): TourStep[] {
 	return [...steps].sort((a, b) => {
 		const aKey = stepOrderingKey(a);
 		const bKey = stepOrderingKey(b);
-		if (aKey.filePath !== bKey.filePath) {
-			return aKey.filePath.localeCompare(bKey.filePath);
-		}
 		if (aKey.definitionRank !== bKey.definitionRank) {
 			return aKey.definitionRank - bKey.definitionRank;
+		}
+		if (aKey.filePath !== bKey.filePath) {
+			return aKey.filePath.localeCompare(bKey.filePath);
 		}
 		return aKey.startLine - bKey.startLine;
 	});
