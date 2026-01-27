@@ -7,11 +7,11 @@ import {
 
 export function buildTourSteps(groups: ChangeUnitGroup[]): TourStep[] {
 	const mainSteps = buildMainSteps(groups);
-	const backgroundSteps = buildBackgroundStepsForTour(
+	const steps = buildBackgroundStepsForTour(
 		mainSteps,
 		() => 'Background context placeholder.'
 	);
-	return [...backgroundSteps, ...mainSteps];
+	return steps;
 }
 
 export async function buildTourStepsWithExplanations(
@@ -19,11 +19,11 @@ export async function buildTourStepsWithExplanations(
 	generator: ExplanationGenerator
 ): Promise<TourStep[]> {
 	const mainSteps = await buildMainStepsAsync(groups, generator);
-	const backgroundSteps = await buildBackgroundStepsForTourAsync(
+	const steps = await buildBackgroundStepsForTourAsync(
 		mainSteps,
 		region => generator.generateBackgroundForRegion(region)
 	);
-	return [...backgroundSteps, ...mainSteps];
+	return steps;
 }
 
 function reorderMainSteps(steps: TourStep[]): TourStep[] {
