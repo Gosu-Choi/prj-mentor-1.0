@@ -188,7 +188,7 @@ export class TourSidebarWebviewProvider
 		function renderGraph(graph, currentId) {
 			const nodes = graph.nodes.map(node => ({
 				id: node.id,
-				label: node.label,
+				label: node.kind === 'operation' ? '' : node.label,
 				color: node.kind === 'definition'
 					? '#f59e0b'
 					: node.kind === 'operation'
@@ -207,6 +207,8 @@ export class TourSidebarWebviewProvider
 			}));
 
 			const previousPositions = network ? network.getPositions() : {};
+			const previousView = network ? network.getViewPosition() : null;
+			const previousScale = network ? network.getScale() : null;
 			const data = {
 				nodes: new vis.DataSet(nodes),
 				edges: new vis.DataSet(edges)
@@ -214,19 +216,31 @@ export class TourSidebarWebviewProvider
 
 			if (!network) {
 				network = new vis.Network(graphEl, data, {
+					layout: {
+						improvedLayout: true
+					},
 					interaction: {
 						hover: true,
 						tooltipDelay: 120
 					},
 					physics: {
 						enabled: true,
+						solver: 'barnesHut',
+						barnesHut: {
+							gravitationalConstant: -1200,
+							centralGravity: 0.32,
+							springLength: 80,
+							springConstant: 0.05,
+							damping: 0.6,
+							avoidOverlap: 0.6
+						},
 						stabilization: {
-							iterations: 200,
+							iterations: 250,
 							fit: true
 						}
 					},
 					edges: {
-						smooth: true
+						smooth: false
 					}
 				});
 				network.on('click', params => {
@@ -239,7 +253,13 @@ export class TourSidebarWebviewProvider
 				Object.entries(previousPositions).forEach(([id, pos]) => {
 					network.moveNode(id, pos.x, pos.y);
 				});
-				network.stabilize(60);
+				if (previousView && previousScale) {
+					network.moveTo({
+						position: previousView,
+						scale: previousScale,
+						animation: false
+					});
+				}
 			}
 		}
 
