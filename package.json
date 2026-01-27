@@ -14,7 +14,8 @@
     "onCommand:mentor.nextStep",
     "onCommand:mentor.previousStep",
     "onCommand:mentor.stopTour",
-    "onView:mentor.intentView"
+    "onView:mentor.intentView",
+    "onView:mentor.tourSidebar"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -36,7 +37,8 @@
         },
         {
           "id": "mentor.tourSidebar",
-          "name": "Tour"
+          "name": "Tour",
+          "type": "webview"
         }
       ]
     },
@@ -105,6 +107,7 @@
     "@vscode/tree-sitter-wasm": "^0.3.0",
     "dotenv": "^17.2.3",
     "openai": "^6.16.0",
+    "vis-network": "^10.0.2",
     "web-tree-sitter": "^0.26.3"
   }
 }

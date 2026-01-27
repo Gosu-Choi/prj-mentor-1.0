@@ -16,6 +16,29 @@ export class TourController {
 		this.emit();
 	}
 
+	jumpToStep(stepId: string): void {
+		const index = this.steps.findIndex(step => step.id === stepId);
+		if (index < 0) {
+			return;
+		}
+		if (this.steps.length === 0) {
+			this.status = 'completed';
+			this.currentIndex = -1;
+			this.emit();
+			return;
+		}
+		this.status = 'running';
+		let nextIndex = index;
+		if (!this.showBackground && this.steps[nextIndex]?.type === 'background') {
+			nextIndex = this.findNextIndex(nextIndex, 1);
+			if (nextIndex < 0) {
+				return;
+			}
+		}
+		this.currentIndex = nextIndex;
+		this.emit();
+	}
+
 	updateExplanations(
 		explanations: Map<string, string>,
 		placeholder: string

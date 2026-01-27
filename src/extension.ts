@@ -12,12 +12,12 @@ import { buildStepKey, ExplanationStore } from './features/functionLevelExplanat
 import { buildTourSteps, buildTourStepsWithExplanations } from './features/tour/tourBuilder';
 import { TourController } from './features/tour/tourController';
 import { MentorGitProvider } from './vscode/mentorGitProvider';
-import { TourSidebarProvider } from './vscode/tourSidebarProvider';
 import { TourUi } from './vscode/tourUi';
 import { BackgroundContextBuilder } from './features/background/backgroundContextBuilder';
 import { DebugInfoService } from './vscode/debugInfo';
 import { IntentViewProvider } from './vscode/intentViewProvider';
 import { writeTourDebugLog } from './vscode/tourDebugLog';
+import { TourSidebarWebviewProvider } from './vscode/tourSidebarWebview';
 
 export function activate(context: vscode.ExtensionContext) {
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -47,8 +47,11 @@ export function activate(context: vscode.ExtensionContext) {
 		)
 	);
 	const tourUi = new TourUi(controller, workspaceRootUri, gitProvider);
-	const tourSidebarProvider = new TourSidebarProvider(controller);
 	const debugInfo = new DebugInfoService();
+	const tourSidebarProvider = new TourSidebarWebviewProvider(
+		controller,
+		context.extensionUri
+	);
 	const intentProvider = new IntentViewProvider(
 		context,
 		async intent => {
@@ -56,7 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 	context.subscriptions.push(
-		vscode.window.registerTreeDataProvider(
+		vscode.window.registerWebviewViewProvider(
 			'mentor.tourSidebar',
 			tourSidebarProvider
 		)

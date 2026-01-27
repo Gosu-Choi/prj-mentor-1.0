@@ -1,0 +1,274 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { TourController } from '../features/tour/tourController';
+import { buildTourGraph } from '../features/tour/tourGraph';
+import { TourStep } from '../features/functionLevelExplanation/models';
+
+export class TourSidebarWebviewProvider
+	implements vscode.WebviewViewProvider, vscode.Disposable
+{
+	private readonly disposables: vscode.Disposable[] = [];
+	private view?: vscode.WebviewView;
+	private unsubscribe?: () => void;
+
+	constructor(
+		private readonly controller: TourController,
+		private readonly extensionUri: vscode.Uri
+	) {
+		this.unsubscribe = this.controller.onDidChange(() => {
+			this.update();
+		});
+	}
+
+	resolveWebviewView(webviewView: vscode.WebviewView): void {
+		this.view = webviewView;
+		const webview = webviewView.webview;
+		webview.options = {
+			enableScripts: true,
+		};
+		webview.html = this.getHtml(webview);
+
+		const subscription = webview.onDidReceiveMessage(async message => {
+			if (!message || typeof message !== 'object') {
+				return;
+			}
+			switch (message.type) {
+				case 'start':
+					await vscode.commands.executeCommand('mentor.startTour');
+					break;
+				case 'stop':
+					this.controller.stop();
+					break;
+				case 'next':
+					this.controller.next();
+					break;
+				case 'previous':
+					this.controller.previous();
+					break;
+				case 'toggleBackground':
+					this.controller.toggleShowBackground();
+					break;
+				case 'clear':
+					await vscode.commands.executeCommand('mentor.clearExplanations');
+					break;
+				case 'debug':
+					await vscode.commands.executeCommand('mentor.showDebugInfo');
+					break;
+				case 'selectStep':
+					if (typeof message.id === 'string') {
+						this.controller.jumpToStep(message.id);
+					}
+					break;
+				default:
+					break;
+			}
+		});
+
+		this.disposables.push(subscription);
+		this.update();
+	}
+
+	dispose(): void {
+		for (const disposable of this.disposables) {
+			disposable.dispose();
+		}
+		this.disposables.length = 0;
+		this.unsubscribe?.();
+	}
+
+	private update(): void {
+		if (!this.view) {
+			return;
+		}
+		const state = this.controller.getState();
+		const step = this.controller.getCurrentStep();
+		const graph = buildTourGraph(state.steps);
+		this.view.webview.postMessage({
+			type: 'update',
+			status: state.status,
+			showBackground: state.showBackground,
+			currentIndex: state.currentIndex,
+			total: state.steps.length,
+			stepLabel: step ? formatStepLabel(state.currentIndex, state.steps.length, step) : 'No active step.',
+			explanation: step?.explanation ?? '',
+			graph,
+			currentId: step?.id ?? null,
+		});
+	}
+
+	private getHtml(webview: vscode.Webview): string {
+		const nonce = getNonce();
+		const visUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(
+				this.extensionUri,
+				'node_modules',
+				'vis-network',
+				'standalone',
+				'umd',
+				'vis-network.min.js'
+			)
+		);
+		return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource};">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>MENTOR Tour</title>
+	<style>
+		body {
+			font-family: var(--vscode-font-family);
+			color: var(--vscode-foreground);
+			padding: 10px;
+		}
+		.controls {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 6px;
+		}
+		button {
+			padding: 6px 8px;
+			border-radius: 4px;
+			border: 1px solid var(--vscode-button-border, transparent);
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			cursor: pointer;
+		}
+		button.secondary {
+			background: var(--vscode-button-secondaryBackground);
+			color: var(--vscode-button-secondaryForeground);
+		}
+		.status {
+			margin-top: 8px;
+			font-size: 12px;
+			opacity: 0.8;
+		}
+		.graph {
+			margin-top: 6px;
+			border: 1px solid var(--vscode-input-border);
+			border-radius: 6px;
+			padding: 6px;
+			height: 320px;
+		}
+		#graph {
+			width: 100%;
+			height: 100%;
+		}
+	</style>
+</head>
+<body>
+	<div class="controls">
+		<button id="start">Start</button>
+		<button id="stop" class="secondary">Stop</button>
+		<button id="prev">Previous</button>
+		<button id="next">Next</button>
+		<button id="toggle" class="secondary">Toggle Background</button>
+		<button id="clear" class="secondary">Clear Explanations</button>
+		<button id="debug" class="secondary">Debug Info</button>
+	</div>
+	<div class="status" id="status"></div>
+	<div class="graph">
+		<div id="graph"></div>
+	</div>
+	<script nonce="${nonce}" src="${visUri}"></script>
+	<script nonce="${nonce}">
+		const vscode = acquireVsCodeApi();
+		const statusEl = document.getElementById('status');
+		const graphEl = document.getElementById('graph');
+		let network = null;
+
+		document.getElementById('start').addEventListener('click', () => vscode.postMessage({ type: 'start' }));
+		document.getElementById('stop').addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
+		document.getElementById('prev').addEventListener('click', () => vscode.postMessage({ type: 'previous' }));
+		document.getElementById('next').addEventListener('click', () => vscode.postMessage({ type: 'next' }));
+		document.getElementById('toggle').addEventListener('click', () => vscode.postMessage({ type: 'toggleBackground' }));
+		document.getElementById('clear').addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
+		document.getElementById('debug').addEventListener('click', () => vscode.postMessage({ type: 'debug' }));
+
+		function renderGraph(graph, currentId) {
+			const nodes = graph.nodes.map(node => ({
+				id: node.id,
+				label: node.label,
+				color: node.kind === 'definition'
+					? '#f59e0b'
+					: node.kind === 'operation'
+						? '#3b82f6'
+						: '#6b7280',
+				font: { color: 'var(--vscode-foreground)', size: 11 },
+				borderWidth: node.id === currentId ? 2 : 1,
+				shape: 'dot',
+				size: node.id === currentId ? 14 : 10
+			}));
+			const edges = graph.edges.map(edge => ({
+				from: edge.from,
+				to: edge.to,
+				color: edge.type === 'def-to-def' ? '#f59e0b' : '#3b82f6',
+				arrows: 'to'
+			}));
+
+			const previousPositions = network ? network.getPositions() : {};
+			const data = {
+				nodes: new vis.DataSet(nodes),
+				edges: new vis.DataSet(edges)
+			};
+
+			if (!network) {
+				network = new vis.Network(graphEl, data, {
+					interaction: {
+						hover: true,
+						tooltipDelay: 120
+					},
+					physics: {
+						enabled: true,
+						stabilization: {
+							iterations: 200,
+							fit: true
+						}
+					},
+					edges: {
+						smooth: true
+					}
+				});
+				network.on('click', params => {
+					if (params.nodes && params.nodes.length > 0) {
+						vscode.postMessage({ type: 'selectStep', id: params.nodes[0] });
+					}
+				});
+			} else {
+				network.setData(data);
+				Object.entries(previousPositions).forEach(([id, pos]) => {
+					network.moveNode(id, pos.x, pos.y);
+				});
+				network.stabilize(60);
+			}
+		}
+
+		window.addEventListener('message', event => {
+			const message = event.data;
+			if (!message || message.type !== 'update') return;
+			statusEl.textContent = \`Status: \${message.status} | Background: \${message.showBackground ? 'on' : 'off'} | \${message.stepLabel}\`;
+			renderGraph(message.graph, message.currentId);
+		});
+	</script>
+</body>
+</html>`;
+	}
+}
+
+function formatStepLabel(
+	index: number,
+	total: number,
+	step: TourStep
+): string {
+	return `${step.type.toUpperCase()} ${index + 1} / ${total}`;
+}
+
+function getNonce(): string {
+	let text = '';
+	const possible =
+		'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+	for (let i = 0; i < 16; i += 1) {
+		text += possible.charAt(Math.floor(Math.random() * possible.length));
+	}
+	return text;
+}

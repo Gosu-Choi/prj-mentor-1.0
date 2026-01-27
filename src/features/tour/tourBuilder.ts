@@ -101,6 +101,7 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 			filePath: string;
 			introducedDefinitions?: Array<{ name: string }>;
 			relatedCalls?: Array<{ name: string; qualifiedName?: string }>;
+			diffText?: string;
 		};
 		const opId = idByStep.get(node.step);
 		if (opId === undefined) {
@@ -109,16 +110,11 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 
 		if (node.changeKind === 'definition') {
 			const linkedDefs: GraphNode[] = [];
-			for (const call of target.relatedCalls ?? []) {
-				const key = `${node.filePath}|${call.name}`;
+			const callNames = collectCallNames(target.relatedCalls, target.diffText);
+			for (const callName of callNames) {
+				const key = `${node.filePath}|${callName}`;
 				const defs = defByFileAndName.get(key) ?? [];
 				linkedDefs.push(...defs);
-				if (call.qualifiedName && call.qualifiedName !== call.name) {
-					const qualifiedKey = `${node.filePath}|${call.qualifiedName}`;
-					const qualifiedDefs =
-						defByFileAndName.get(qualifiedKey) ?? [];
-					linkedDefs.push(...qualifiedDefs);
-				}
 			}
 
 			for (const defNode of linkedDefs) {
@@ -143,15 +139,11 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 			const defs = defByFileAndName.get(key) ?? [];
 			linkedDefs.push(...defs);
 		}
-		for (const call of target.relatedCalls ?? []) {
-			const key = `${node.filePath}|${call.name}`;
+		const callNames = collectCallNames(target.relatedCalls, target.diffText);
+		for (const callName of callNames) {
+			const key = `${node.filePath}|${callName}`;
 			const defs = defByFileAndName.get(key) ?? [];
 			linkedDefs.push(...defs);
-			if (call.qualifiedName && call.qualifiedName !== call.name) {
-				const qualifiedKey = `${node.filePath}|${call.qualifiedName}`;
-				const qualifiedDefs = defByFileAndName.get(qualifiedKey) ?? [];
-				linkedDefs.push(...qualifiedDefs);
-			}
 		}
 
 		for (const defNode of linkedDefs) {
@@ -343,6 +335,57 @@ function componentSortKey(nodes: GraphNode[], component: number[]): {
 		filePath: best.filePath,
 		startLine: best.startLine,
 	};
+}
+
+function collectCallNames(
+	relatedCalls: Array<{ name: string; qualifiedName?: string }> | undefined,
+	diffText: string | undefined
+): Set<string> {
+	const names = new Set<string>();
+	for (const call of relatedCalls ?? []) {
+		if (call.name) {
+			names.add(call.name);
+		}
+		if (call.qualifiedName && call.qualifiedName !== call.name) {
+			const parts = call.qualifiedName.split('.');
+			for (const part of parts) {
+				if (part && part !== 'self' && part !== 'this') {
+					names.add(part);
+				}
+			}
+		}
+	}
+	if (diffText) {
+		const lines = diffText.split(/\r?\n/);
+		for (const line of lines) {
+			if (!line.startsWith('+')) {
+				continue;
+			}
+			const text = line.slice(1);
+			const callMatches = text.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*\(/g);
+			for (const match of callMatches) {
+				const name = match[1];
+				if (name && name !== 'if' && name !== 'for' && name !== 'while') {
+					names.add(name);
+				}
+			}
+			const methodMatches = text.matchAll(/(?:self|this)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g);
+			for (const match of methodMatches) {
+				const name = match[1];
+				if (name) {
+					names.add(name);
+				}
+			}
+			const attrMatches = text.matchAll(/(?:self|this)\.([A-Za-z_][A-Za-z0-9_]*)/g);
+			for (const match of attrMatches) {
+				const name = match[1];
+				if (name) {
+					names.add(name);
+				}
+			}
+		}
+	}
+	return names;
 }
 
 function detectDefinitionChange(diffText: string): boolean {
