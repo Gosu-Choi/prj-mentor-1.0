@@ -24,6 +24,10 @@ export interface ChangeUnit {
 		qualifiedName?: string;
 		range: LineRange;
 	}>;
+	isOverall?: boolean;
+	elementKind?: 'function' | 'method' | 'class' | 'global';
+	qualifiedName?: string;
+	containerName?: string;
 }
 
 export interface CodeRegion {
@@ -48,6 +52,7 @@ export interface TourState {
 	status: 'idle' | 'running' | 'paused' | 'completed';
 	showBackground: boolean;
 	showGlobals: boolean;
+	overallMode: boolean;
 }
 
 export interface ChangeUnitGroup {

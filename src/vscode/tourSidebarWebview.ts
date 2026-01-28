@@ -51,6 +51,9 @@ export class TourSidebarWebviewProvider
 				case 'toggleGlobals':
 					this.controller.toggleShowGlobals();
 					break;
+				case 'toggleOverall':
+					await vscode.commands.executeCommand('mentor.toggleOverallView');
+					break;
 				case 'clear':
 					await vscode.commands.executeCommand('mentor.clearExplanations');
 					break;
@@ -94,6 +97,7 @@ export class TourSidebarWebviewProvider
 			status: state.status,
 			showBackground: state.showBackground,
 			showGlobals: state.showGlobals,
+			overallMode: state.overallMode,
 			currentIndex: state.currentIndex,
 			total: state.steps.length,
 			stepLabel: step ? formatStepLabel(state.currentIndex, state.steps.length, step) : 'No active step.',
@@ -171,6 +175,7 @@ export class TourSidebarWebviewProvider
 		<button id="next">Next</button>
 		<button id="toggle" class="secondary">Toggle Background</button>
 		<button id="toggleGlobals" class="secondary">Toggle Globals</button>
+		<button id="toggleOverall" class="secondary">Toggle Overall</button>
 		<button id="clear" class="secondary">Clear Explanations</button>
 		<button id="debug" class="secondary">Debug Info</button>
 	</div>
@@ -184,6 +189,7 @@ export class TourSidebarWebviewProvider
 		const statusEl = document.getElementById('status');
 		const graphEl = document.getElementById('graph');
 		let network = null;
+		let currentGraph = null;
 
 		document.getElementById('start').addEventListener('click', () => vscode.postMessage({ type: 'start' }));
 		document.getElementById('stop').addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
@@ -191,16 +197,18 @@ export class TourSidebarWebviewProvider
 		document.getElementById('next').addEventListener('click', () => vscode.postMessage({ type: 'next' }));
 		document.getElementById('toggle').addEventListener('click', () => vscode.postMessage({ type: 'toggleBackground' }));
 		document.getElementById('toggleGlobals').addEventListener('click', () => vscode.postMessage({ type: 'toggleGlobals' }));
+		document.getElementById('toggleOverall').addEventListener('click', () => vscode.postMessage({ type: 'toggleOverall' }));
 		document.getElementById('clear').addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
 		document.getElementById('debug').addEventListener('click', () => vscode.postMessage({ type: 'debug' }));
 
 		function renderGraph(graph, currentId) {
+			currentGraph = graph;
 			const visibleIds = new Set(
 				graph.nodes.filter(node => !node.hidden).map(node => node.id)
 			);
 			const nodes = graph.nodes.map(node => ({
 				id: node.id,
-				label: node.kind === 'operation' ? '' : node.label,
+				label: node.kind === 'operation' && !node.isOverall ? '' : node.label,
 				hidden: node.hidden === true,
 				color: node.kind === 'definition'
 					? '#f59e0b'
@@ -222,6 +230,7 @@ export class TourSidebarWebviewProvider
 					color: edge.type === 'def-to-def' ? '#f59e0b' : '#3b82f6',
 					arrows: 'to'
 				}));
+			currentGraph = { nodes, edges };
 
 			const previousPositions = network ? network.getPositions() : {};
 			const previousView = network ? network.getViewPosition() : null;
@@ -284,10 +293,11 @@ export class TourSidebarWebviewProvider
 			}
 		}
 
+
 		window.addEventListener('message', event => {
 			const message = event.data;
 			if (!message || message.type !== 'update') return;
-			statusEl.textContent = \`Status: \${message.status} | Background: \${message.showBackground ? 'on' : 'off'} | Globals: \${message.showGlobals ? 'on' : 'off'} | \${message.stepLabel}\`;
+			statusEl.textContent = \`Status: \${message.status} | Background: \${message.showBackground ? 'on' : 'off'} | Globals: \${message.showGlobals ? 'on' : 'off'} | Overall: \${message.overallMode ? 'on' : 'off'} | \${message.stepLabel}\`;
 			renderGraph(message.graph, message.currentId);
 		});
 	</script>
@@ -322,7 +332,7 @@ function applyGlobalVisibility(
 		return graph;
 	}
 	const nodes = graph.nodes.map(node =>
-		node.kind === 'global' ? { ...node, hidden: true } : node
+		node.elementKind === 'global' ? { ...node, hidden: true } : node
 	);
 	return {
 		...graph,

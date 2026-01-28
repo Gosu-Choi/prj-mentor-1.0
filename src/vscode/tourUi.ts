@@ -59,20 +59,24 @@ export class TourUi implements vscode.Disposable {
 
 	private async highlightStep(step: TourStep): Promise<void> {
 		const target = normalizeTarget(step.target);
-		const originalUri = this.gitProvider.toVirtualUri(
-			target.filePath
-		);
-		const revisedUri = vscode.Uri.joinPath(
-			this.workspaceRoot,
-			target.filePath
-		);
+		const originalUri = this.gitProvider.toVirtualUri(target.filePath);
+		const revisedUri = vscode.Uri.joinPath(this.workspaceRoot, target.filePath);
 		try {
-			await vscode.commands.executeCommand(
-				'vscode.diff',
-				originalUri,
-				revisedUri,
-				'MENTOR'
-			);
+			const isOverall =
+				step.type === 'main' &&
+				'diffText' in step.target &&
+				(step.target as ChangeUnit).isOverall;
+			if (isOverall) {
+				const document = await vscode.workspace.openTextDocument(revisedUri);
+				await vscode.window.showTextDocument(document, { preview: true });
+			} else {
+				await vscode.commands.executeCommand(
+					'vscode.diff',
+					originalUri,
+					revisedUri,
+					'MENTOR'
+				);
+			}
 
 			const targetUri =
 				step.type === 'background' ? originalUri : revisedUri;
@@ -146,6 +150,9 @@ function buildDiffTitle(step: TourStep): string {
 	}
 
 	const target = step.target as ChangeUnit;
+	if (target.isOverall) {
+		return 'MENTOR: Overall View';
+	}
 	const changeKind = target.changeKind ?? 'operation';
 	if (changeKind === 'global') {
 		const name =
@@ -174,6 +181,10 @@ function buildCommentLabel(step: TourStep): string {
 	}
 
 	const target = step.target as ChangeUnit;
+	if (target.isOverall) {
+		const label = target.symbolName ?? target.definitionName;
+		return label ? `MENTOR: Overall View / ${label}` : 'MENTOR: Overall View';
+	}
 	const changeKind = target.changeKind ?? 'operation';
 	if (changeKind === 'global') {
 		const name =

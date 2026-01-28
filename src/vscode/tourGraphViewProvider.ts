@@ -233,7 +233,7 @@ function applyGlobalVisibility(
 		return graph;
 	}
 	const nodes = graph.nodes.map(node =>
-		node.kind === 'global' ? { ...node, hidden: true } : node
+		node.elementKind === 'global' ? { ...node, hidden: true } : node
 	);
 	const hiddenIds = new Set(
 		nodes.filter(node => node.hidden).map(node => node.id)

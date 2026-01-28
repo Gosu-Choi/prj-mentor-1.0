@@ -8,6 +8,7 @@ export class TourController {
 	private status: TourState['status'] = 'idle';
 	private showBackground = true;
 	private showGlobals = true;
+	private overallMode = false;
 	private listeners = new Set<Listener>();
 
 	setSteps(steps: TourStep[]): void {
@@ -106,6 +107,7 @@ export class TourController {
 			status: this.status,
 			showBackground: this.showBackground,
 			showGlobals: this.showGlobals,
+			overallMode: this.overallMode,
 		};
 	}
 
@@ -151,6 +153,15 @@ export class TourController {
 
 	toggleShowGlobals(): void {
 		this.setShowGlobals(!this.showGlobals);
+	}
+
+	setOverallMode(value: boolean): void {
+		this.overallMode = value;
+		this.emit();
+	}
+
+	toggleOverallMode(): void {
+		this.setOverallMode(!this.overallMode);
 	}
 
 	private findNextIndex(start: number, direction: 1 | -1): number {

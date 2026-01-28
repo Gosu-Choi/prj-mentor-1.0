@@ -15,6 +15,7 @@
     "onCommand:mentor.previousStep",
     "onCommand:mentor.stopTour",
     "onCommand:mentor.toggleGlobals",
+    "onCommand:mentor.toggleOverallView",
     "onView:mentor.intentView",
     "onView:mentor.tourSidebar"
   ],
@@ -75,6 +76,10 @@
       {
         "command": "mentor.toggleGlobals",
         "title": "MENTOR: Toggle Global Variables"
+      },
+      {
+        "command": "mentor.toggleOverallView",
+        "title": "MENTOR: Toggle Overall View"
       },
       {
         "command": "mentor.showDebugInfo",

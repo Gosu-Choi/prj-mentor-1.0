@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { parseChangeUnitsFromDiff, splitChangeUnitsByDefinitions } from './features/functionLevelExplanation/changeUnits';
 import { getGitDiffAgainstHead } from './features/functionLevelExplanation/gitDiff';
 import { groupChangeUnits } from './features/functionLevelExplanation/grouping';
+import { applyChangesToOverall, buildOverallIndex } from './features/functionLevelExplanation/overallUnits';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import OpenAI from 'openai';
@@ -32,6 +33,11 @@ export function activate(context: vscode.ExtensionContext) {
 	dotenv.config({ path: path.join(workspaceRootUri.fsPath, '.env') });
 
 	const controller = new TourController();
+	const storedOverall = context.workspaceState.get<boolean>(
+		'mentor.overallMode',
+		false
+	);
+	controller.setOverallMode(storedOverall);
 	const explanationStore = new ExplanationStore(
 		workspaceRootUri.fsPath,
 		context
@@ -124,6 +130,19 @@ export function activate(context: vscode.ExtensionContext) {
 		'mentor.toggleGlobals',
 		() => controller.toggleShowGlobals()
 	);
+	const toggleOverallCommand = vscode.commands.registerCommand(
+		'mentor.toggleOverallView',
+		async () => {
+			const next = !controller.getState().overallMode;
+			controller.setOverallMode(next);
+			await context.workspaceState.update('mentor.overallMode', next);
+			const intent = context.workspaceState.get<string>(
+				'mentor.intent',
+				''
+			);
+			await startTour(intent);
+		}
+	);
 
 	const showDebugCommand = vscode.commands.registerCommand(
 		'mentor.showDebugInfo',
@@ -139,6 +158,7 @@ export function activate(context: vscode.ExtensionContext) {
 		clearExplanationsCommand,
 		toggleBackgroundCommand,
 		toggleGlobalsCommand,
+		toggleOverallCommand,
 		showDebugCommand,
 		tourUi,
 		tourSidebarProvider,
@@ -148,6 +168,48 @@ export function activate(context: vscode.ExtensionContext) {
 
 	async function startTour(intent?: string): Promise<void> {
 		try {
+			if (controller.getState().overallMode) {
+				const files = await vscode.workspace.findFiles(
+					'**/*.{ts,tsx,js,jsx,py}',
+					'**/{node_modules,dist,out,.git}/**'
+				);
+				const filePaths = files.map(file =>
+					path.relative(workspaceRootUri.fsPath, file.fsPath)
+				);
+				const overallIndex = await buildOverallIndex(
+					workspaceRootUri.fsPath,
+					filePaths
+				);
+				if (overallIndex.units.length === 0) {
+					void vscode.window.showInformationMessage(
+						'No source files found for overall view.'
+					);
+					return;
+				}
+				const diffText = await getGitDiffAgainstHead(
+					workspaceRootUri.fsPath
+				);
+				if (diffText.trim()) {
+					const rawUnits = parseChangeUnitsFromDiff(
+						diffText,
+						workspaceRootUri.fsPath
+					);
+					const changeUnits = await splitChangeUnitsByDefinitions(
+						rawUnits,
+						workspaceRootUri.fsPath
+					);
+					applyChangesToOverall(overallIndex, changeUnits);
+				}
+				const steps = overallIndex.units.map((unit, index) => ({
+					id: `overall-${index + 1}`,
+					type: 'main' as const,
+					target: unit,
+					explanation: '',
+				}));
+				controller.setSteps(steps);
+				controller.start();
+				return;
+			}
 			const diffText = await getGitDiffAgainstHead(
 				workspaceRootUri.fsPath
 			);

@@ -160,6 +160,14 @@ export async function splitChangeUnitsByDefinitions(
 				definitionName: def.name,
 				definitionType:
 					def.type === 'global-variable' ? 'variable' : def.type,
+				elementKind:
+					def.type === 'global-variable'
+						? 'global'
+						: def.type === 'class'
+							? 'class'
+							: def.type === 'method'
+								? 'method'
+								: 'function',
 			});
 		}
 
@@ -195,6 +203,7 @@ export async function splitChangeUnitsByDefinitions(
 				diffText: operationalDiff,
 				changeKind: 'operation',
 				changeType,
+				elementKind: unit.elementKind,
 				introducedDefinitions: relevantDefinitions.map(def => ({
 					name: def.name,
 					type:

@@ -8,6 +8,8 @@ export interface TourGraphNode {
 	filePath: string;
 	startLine: number;
 	endLine: number;
+	elementKind?: ChangeUnit['elementKind'];
+	isOverall?: boolean;
 	hidden?: boolean;
 }
 
@@ -45,20 +47,32 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 			filePath: target.filePath,
 			startLine: target.range.startLine,
 			endLine: target.range.endLine,
+			elementKind: target.elementKind ?? (kind === 'global' ? 'global' : undefined),
+			isOverall: target.isOverall,
 		};
 		nodes.push(node);
 		nodeByStepId.set(step.id, node);
 	}
 
 	const defByFileAndName = new Map<string, TourGraphNode[]>();
+	const classByFileAndName = new Map<string, TourGraphNode[]>();
 	for (const node of nodes) {
-		if (node.kind !== 'definition' && node.kind !== 'global') {
+		const canResolve =
+			node.elementKind !== undefined ||
+			node.kind === 'definition' ||
+			node.kind === 'global';
+		if (!canResolve) {
 			continue;
 		}
 		const key = `${node.filePath}|${node.label}`;
 		const list = defByFileAndName.get(key) ?? [];
 		list.push(node);
 		defByFileAndName.set(key, list);
+		if (node.elementKind === 'class') {
+			const classList = classByFileAndName.get(key) ?? [];
+			classList.push(node);
+			classByFileAndName.set(key, classList);
+		}
 	}
 
 	const edges: TourGraphEdge[] = [];
@@ -97,7 +111,7 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 			continue;
 		}
 
-		if (fromNode.kind === 'definition') {
+		if (fromNode.kind === 'definition' || (target.isOverall && target.relatedCalls?.length)) {
 			const relatedNames = collectRelatedNames(target);
 			for (const name of relatedNames) {
 				const key = `${target.filePath}|${name}`;
@@ -112,6 +126,21 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 						type: 'def-to-def',
 					});
 				}
+			}
+		}
+
+		if (target.isOverall && target.elementKind === 'method' && target.containerName) {
+			const key = `${target.filePath}|${target.containerName}`;
+			const classes = classByFileAndName.get(key) ?? [];
+			for (const classNode of classes) {
+				if (classNode.id === fromId) {
+					continue;
+				}
+				edges.push({
+					from: fromId,
+					to: classNode.id,
+					type: 'def-to-def',
+				});
 			}
 		}
 	}
