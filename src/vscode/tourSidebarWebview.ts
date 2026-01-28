@@ -149,6 +149,10 @@ export class TourSidebarWebviewProvider
 			background: var(--vscode-button-secondaryBackground);
 			color: var(--vscode-button-secondaryForeground);
 		}
+		button.danger {
+			background: var(--vscode-inputValidation-errorBackground);
+			color: var(--vscode-inputValidation-errorForeground);
+		}
 		.status {
 			margin-top: 8px;
 			font-size: 12px;
@@ -179,7 +183,7 @@ export class TourSidebarWebviewProvider
 		<button id="toggle" class="secondary">Toggle Background</button>
 		<button id="toggleGlobals" class="secondary">Toggle Globals</button>
 		<button id="toggleOverall" class="secondary">Toggle Overall</button>
-		<button id="clear" class="secondary">Clear Explanations</button>
+		<button id="clear" class="danger">Clear Explanations</button>
 		<button id="debug" class="secondary">Debug Info</button>
 	</div>
 	<div class="status" id="status"></div>
