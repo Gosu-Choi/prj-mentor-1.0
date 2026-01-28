@@ -9,6 +9,7 @@ export interface TourGraphNode {
 	startLine: number;
 	endLine: number;
 	elementKind?: ChangeUnit['elementKind'];
+	qualifiedName?: string;
 	isOverall?: boolean;
 	hidden?: boolean;
 }
@@ -48,6 +49,7 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 			startLine: target.range.startLine,
 			endLine: target.range.endLine,
 			elementKind: target.elementKind ?? (kind === 'global' ? 'global' : undefined),
+			qualifiedName: target.qualifiedName,
 			isOverall: target.isOverall,
 		};
 		nodes.push(node);
@@ -55,6 +57,8 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 	}
 
 	const defByFileAndName = new Map<string, TourGraphNode[]>();
+	const defByFileAndQualified = new Map<string, TourGraphNode[]>();
+	const defByNameGlobal = new Map<string, TourGraphNode[]>();
 	const classByFileAndName = new Map<string, TourGraphNode[]>();
 	for (const node of nodes) {
 		const canResolve =
@@ -68,6 +72,15 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 		const list = defByFileAndName.get(key) ?? [];
 		list.push(node);
 		defByFileAndName.set(key, list);
+		const globalList = defByNameGlobal.get(node.label) ?? [];
+		globalList.push(node);
+		defByNameGlobal.set(node.label, globalList);
+		if (node.qualifiedName) {
+			const qKey = `${node.filePath}|${node.qualifiedName}`;
+			const qList = defByFileAndQualified.get(qKey) ?? [];
+			qList.push(node);
+			defByFileAndQualified.set(qKey, qList);
+		}
 		if (node.elementKind === 'class') {
 			const classList = classByFileAndName.get(key) ?? [];
 			classList.push(node);
@@ -86,8 +99,14 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 
 		if (fromNode.kind === 'operation') {
 			for (const def of target.introducedDefinitions ?? []) {
-				const key = `${target.filePath}|${def.name}`;
-				const defs = defByFileAndName.get(key) ?? [];
+				const defs = resolveDefinitions(
+					defByFileAndQualified,
+					defByFileAndName,
+					defByNameGlobal,
+					target.filePath,
+					def.name,
+					undefined
+				);
 				for (const defNode of defs) {
 					edges.push({
 						from: fromId,
@@ -96,10 +115,16 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 					});
 				}
 			}
-			const relatedNames = collectRelatedNames(target);
-			for (const name of relatedNames) {
-				const key = `${target.filePath}|${name}`;
-				const defs = defByFileAndName.get(key) ?? [];
+			const related = collectRelatedCalls(target);
+			for (const call of related) {
+				const defs = resolveDefinitions(
+					defByFileAndQualified,
+					defByFileAndName,
+					defByNameGlobal,
+					target.filePath,
+					call.name,
+					call.qualifiedName
+				);
 				for (const defNode of defs) {
 					edges.push({
 						from: fromId,
@@ -112,10 +137,16 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 		}
 
 		if (fromNode.kind === 'definition' || (target.isOverall && target.relatedCalls?.length)) {
-			const relatedNames = collectRelatedNames(target);
-			for (const name of relatedNames) {
-				const key = `${target.filePath}|${name}`;
-				const defs = defByFileAndName.get(key) ?? [];
+			const related = collectRelatedCalls(target);
+			for (const call of related) {
+				const defs = resolveDefinitions(
+					defByFileAndQualified,
+					defByFileAndName,
+					defByNameGlobal,
+					target.filePath,
+					call.name,
+					call.qualifiedName
+				);
 				for (const defNode of defs) {
 					if (defNode.id === fromId) {
 						continue;
@@ -149,6 +180,33 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 		nodes,
 		edges,
 	};
+}
+
+function resolveDefinitions(
+	byQualified: Map<string, TourGraphNode[]>,
+	byName: Map<string, TourGraphNode[]>,
+	byNameGlobal: Map<string, TourGraphNode[]>,
+	filePath: string,
+	name: string,
+	qualifiedName?: string
+): TourGraphNode[] {
+	if (qualifiedName) {
+		const qKey = `${filePath}|${qualifiedName}`;
+		const qualified = byQualified.get(qKey);
+		if (qualified && qualified.length > 0) {
+			return qualified;
+		}
+	}
+	const key = `${filePath}|${name}`;
+	const local = byName.get(key);
+	if (local && local.length > 0) {
+		return local;
+	}
+	const global = byNameGlobal.get(name);
+	if (global && global.length === 1) {
+		return global;
+	}
+	return [];
 }
 
 function collectCallNames(
@@ -206,13 +264,19 @@ function collectCallNames(
 	return names;
 }
 
-function collectRelatedNames(target: ChangeUnit): Set<string> {
-	const names = collectCallNames(target.relatedCalls, target.diffText);
-	const identifierNames = collectIdentifierNames(target.diffText);
-	for (const name of identifierNames) {
-		names.add(name);
+function collectRelatedCalls(
+	target: ChangeUnit
+): Array<{ name: string; qualifiedName?: string }> {
+	const calls: Array<{ name: string; qualifiedName?: string }> =
+		(target.relatedCalls ?? []).map(call => ({
+			name: call.name,
+			qualifiedName: call.qualifiedName,
+		}));
+	const names = collectIdentifierNames(target.diffText);
+	for (const name of names) {
+		calls.push({ name });
 	}
-	return names;
+	return calls;
 }
 
 function collectIdentifierNames(diffText: string | undefined): Set<string> {

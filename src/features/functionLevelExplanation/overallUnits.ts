@@ -32,6 +32,7 @@ export async function buildOverallIndex(
 		} catch {
 			continue;
 		}
+		const lines = text.split(/\r?\n/);
 
 		const analysis = await analyzer.analyzeFile(filePath, text);
 		let createdUnits: ChangeUnit[] = [];
@@ -77,6 +78,7 @@ export async function buildOverallIndex(
 
 		if (analysis && createdUnits.length > 0) {
 			attachRelatedCalls(createdUnits, analysis.calls);
+			attachIdentifierReferences(createdUnits, lines, language);
 		}
 	}
 
@@ -190,6 +192,119 @@ function attachRelatedCalls(
 			}));
 		}
 	}
+}
+
+function attachIdentifierReferences(
+	units: ChangeUnit[],
+	lines: string[],
+	language: 'javascript' | 'typescript' | 'python'
+): void {
+	for (const unit of units) {
+		const refs: Array<{ name: string; qualifiedName?: string; range: LineRange }> = [];
+		const seen = new Set<string>();
+		const start = Math.max(1, unit.range.startLine);
+		const end = Math.min(lines.length, unit.range.endLine);
+		for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
+			const raw = lines[lineNumber - 1] ?? '';
+			if (language === 'python' && /^(def|class)\s+/.test(raw.trim())) {
+				continue;
+			}
+			const sanitized = sanitizeLine(raw, language);
+			const dotted = sanitized.matchAll(
+				/\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b/g
+			);
+			for (const match of dotted) {
+				const qualifiedName = match[1];
+				const parts = qualifiedName.split('.');
+				const name = parts[parts.length - 1];
+				if (isIgnoredIdentifier(name, language)) {
+					continue;
+				}
+				const key = `${name}|${qualifiedName}|${lineNumber}`;
+				if (seen.has(key)) {
+					continue;
+				}
+				seen.add(key);
+				refs.push({
+					name,
+					qualifiedName,
+					range: { startLine: lineNumber, endLine: lineNumber },
+				});
+			}
+			const matches = sanitized.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g);
+			for (const match of matches) {
+				const name = match[1];
+				if (isIgnoredIdentifier(name, language)) {
+					continue;
+				}
+				const key = `${name}||${lineNumber}`;
+				if (seen.has(key)) {
+					continue;
+				}
+				seen.add(key);
+				refs.push({
+					name,
+					range: { startLine: lineNumber, endLine: lineNumber },
+				});
+			}
+		}
+		if (refs.length > 0) {
+			const existing = unit.relatedCalls ?? [];
+			unit.relatedCalls = existing.concat(refs);
+		}
+	}
+}
+
+function sanitizeLine(
+	line: string,
+	language: 'javascript' | 'typescript' | 'python'
+): string {
+	let text = line;
+	if (language === 'python') {
+		const hash = text.indexOf('#');
+		if (hash >= 0) {
+			text = text.slice(0, hash);
+		}
+	}
+	return text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ' ');
+}
+
+function isIgnoredIdentifier(
+	name: string,
+	language: 'javascript' | 'typescript' | 'python'
+): boolean {
+	if (!name) {
+		return true;
+	}
+	const keywords = new Set([
+		'if',
+		'for',
+		'while',
+		'return',
+		'def',
+		'class',
+		'async',
+		'await',
+		'new',
+		'import',
+		'from',
+		'export',
+		'as',
+		'this',
+		'self',
+		'true',
+		'false',
+		'null',
+		'none',
+		'undefined',
+	]);
+	if (keywords.has(name)) {
+		return true;
+	}
+	if (language === 'python') {
+		return name === 'in' || name === 'with' || name === 'and' || name === 'or';
+	}
+	return false;
 }
 
 function collectPythonGlobals(
