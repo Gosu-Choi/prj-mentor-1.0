@@ -109,8 +109,8 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 				);
 				for (const defNode of defs) {
 					edges.push({
-						from: fromId,
-						to: defNode.id,
+						from: defNode.id,
+						to: fromId,
 						type: 'op-to-def',
 					});
 				}
@@ -127,8 +127,8 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 				);
 				for (const defNode of defs) {
 					edges.push({
-						from: fromId,
-						to: defNode.id,
+						from: defNode.id,
+						to: fromId,
 						type: 'op-to-def',
 					});
 				}
