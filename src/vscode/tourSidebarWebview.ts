@@ -197,6 +197,7 @@ export class TourSidebarWebviewProvider
 		const graphEl = document.getElementById('graph');
 		let network = null;
 		let currentGraph = null;
+		const savedPositionsByKey = new Map();
 		let groupDragActive = false;
 		let groupDragNodes = [];
 		let groupDragLast = null;
@@ -213,25 +214,63 @@ export class TourSidebarWebviewProvider
 
 		function renderGraph(graph, currentId) {
 			currentGraph = graph;
+			if (network) {
+				const positions = network.getPositions();
+				graph.nodes.forEach(node => {
+					const pos = positions[node.id];
+					if (!pos) return;
+					const key = buildNodeKey(node);
+					savedPositionsByKey.set(key, { x: pos.x, y: pos.y });
+				});
+			}
+
 			const visibleIds = new Set(
 				graph.nodes.filter(node => !node.hidden).map(node => node.id)
 			);
-			const nodes = graph.nodes.map(node => ({
-				id: node.id,
-				label: node.kind === 'operation' && !node.isOverall ? '' : node.label,
-				hidden: node.hidden === true,
-				color: node.kind === 'definition'
-					? '#f59e0b'
-					: node.kind === 'global'
-						? '#22c55e'
-						: node.kind === 'operation'
-							? '#3b82f6'
-							: '#6b7280',
-				font: { color: 'var(--vscode-foreground)', size: 11 },
-				borderWidth: node.id === currentId ? 2 : 1,
-				shape: 'dot',
-				size: node.id === currentId ? 14 : 10
-			}));
+			const nodesWithPos = [];
+			const nodesWithoutPos = [];
+			graph.nodes.forEach(node => {
+				const key = buildNodeKey(node);
+				const pos = savedPositionsByKey.get(key);
+				if (pos) {
+					nodesWithPos.push({ node, pos });
+				} else {
+					nodesWithoutPos.push({ node, key });
+				}
+			});
+
+			const bounds = getBounds(nodesWithPos.map(item => item.pos));
+			const fallback = buildFallbackPositions(
+				nodesWithoutPos.length,
+				bounds
+			);
+			nodesWithoutPos.forEach((entry, index) => {
+				const pos = fallback[index];
+				savedPositionsByKey.set(entry.key, pos);
+			});
+
+			const nodes = graph.nodes.map(node => {
+				const key = buildNodeKey(node);
+				const pos = savedPositionsByKey.get(key);
+				return {
+					id: node.id,
+					label: node.kind === 'operation' && !node.isOverall ? '' : node.label,
+					hidden: node.hidden === true,
+					color: node.kind === 'definition'
+						? '#f59e0b'
+						: node.kind === 'global'
+							? '#22c55e'
+							: node.kind === 'operation'
+								? '#3b82f6'
+								: '#6b7280',
+					font: { color: 'var(--vscode-foreground)', size: 11 },
+					borderWidth: node.id === currentId ? 2 : 1,
+					shape: 'dot',
+					size: node.id === currentId ? 14 : 10,
+					x: pos ? pos.x : undefined,
+					y: pos ? pos.y : undefined
+				};
+			});
 			const edges = graph.edges
 				.filter(edge => visibleIds.has(edge.from) && visibleIds.has(edge.to))
 				.map(edge => ({
@@ -260,7 +299,7 @@ export class TourSidebarWebviewProvider
 						tooltipDelay: 120
 					},
 					physics: {
-						enabled: true,
+						enabled: false,
 						solver: 'barnesHut',
 						barnesHut: {
 							gravitationalConstant: -1200,
@@ -278,9 +317,6 @@ export class TourSidebarWebviewProvider
 					edges: {
 						smooth: false
 					}
-				});
-				network.once('stabilized', () => {
-					network.setOptions({ physics: false });
 				});
 				network.on('click', params => {
 					if (params.nodes && params.nodes.length > 0) {
@@ -338,7 +374,7 @@ export class TourSidebarWebviewProvider
 					groupDragLast = null;
 				});
 			} else {
-				network.setOptions({ physics: false });
+				network.setOptions({ physics: { enabled: false } });
 				network.setData(data);
 				Object.entries(previousPositions).forEach(([id, pos]) => {
 					network.moveNode(id, pos.x, pos.y);
@@ -351,6 +387,49 @@ export class TourSidebarWebviewProvider
 					});
 				}
 			}
+		}
+
+		function buildNodeKey(node) {
+			const label = node.label ?? '';
+			const elementKind = node.elementKind ?? '';
+			const qualified = node.qualifiedName ?? '';
+			const identity = qualified || label;
+			return node.filePath + '|' + elementKind + '|' + identity;
+		}
+
+		function getBounds(positions) {
+			if (!positions.length) {
+				return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+			}
+			let minX = positions[0].x;
+			let maxX = positions[0].x;
+			let minY = positions[0].y;
+			let maxY = positions[0].y;
+			positions.forEach(pos => {
+				minX = Math.min(minX, pos.x);
+				maxX = Math.max(maxX, pos.x);
+				minY = Math.min(minY, pos.y);
+				maxY = Math.max(maxY, pos.y);
+			});
+			return { minX, maxX, minY, maxY };
+		}
+
+		function buildFallbackPositions(count, bounds) {
+			const positions = [];
+			if (count <= 0) return positions;
+			const centerX = (bounds.minX + bounds.maxX) / 2;
+			const centerY = (bounds.minY + bounds.maxY) / 2;
+			const baseRadius = 120;
+			const step = 32;
+			for (let i = 0; i < count; i += 1) {
+				const angle = i * 0.9;
+				const radius = baseRadius + i * step;
+				positions.push({
+					x: centerX + Math.cos(angle) * radius,
+					y: centerY + Math.sin(angle) * radius
+				});
+			}
+			return positions;
 		}
 
 		function buildConnectedGroup(nodeId, graph) {

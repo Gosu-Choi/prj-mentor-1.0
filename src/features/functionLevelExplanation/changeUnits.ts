@@ -185,34 +185,52 @@ export async function splitChangeUnitsByDefinitions(
 			operationalLineNumbers
 		);
 		for (const group of operationalGroups) {
-			const operationalDiff = filterDiffTextByAddedLineNumbers(
-				unit.diffText,
-				new Set(group),
-				false
-			);
 			const groupRange = {
 				startLine: group[0],
 				endLine: group[group.length - 1],
 			};
-			const relevantDefinitions = definitions.filter(def =>
-				rangesOverlap(def.range, groupRange)
+			const byDefinition = splitLinesByDefinitions(
+				group,
+				definitions
 			);
-			result.push({
-				...unit,
-				range: groupRange,
-				diffText: operationalDiff,
-				changeKind: 'operation',
-				changeType,
-				elementKind: unit.elementKind,
-				introducedDefinitions: relevantDefinitions.map(def => ({
-					name: def.name,
-					type:
-						def.type === 'global-variable'
-							? 'variable'
-							: def.type,
-					range: { ...def.range },
-				})),
-			});
+			if (byDefinition.length === 0) {
+				const operationalDiff = filterDiffTextByAddedLineNumbers(
+					unit.diffText,
+					new Set(group),
+					false
+				);
+				result.push({
+					...unit,
+					range: groupRange,
+					diffText: operationalDiff,
+					changeKind: 'operation',
+					changeType,
+					elementKind: unit.elementKind,
+				});
+				continue;
+			}
+
+			for (const chunk of byDefinition) {
+				const operationalDiff = filterDiffTextByAddedLineNumbers(
+					unit.diffText,
+					new Set(chunk.lineNumbers),
+					false
+				);
+				const chunkRange = {
+					startLine: chunk.lineNumbers[0],
+					endLine:
+						chunk.lineNumbers[chunk.lineNumbers.length - 1],
+				};
+				result.push({
+					...unit,
+					range: chunkRange,
+					diffText: operationalDiff,
+					changeKind: 'operation',
+					changeType,
+					elementKind: unit.elementKind,
+					symbolName: chunk.definition?.name ?? unit.symbolName,
+				});
+			}
 		}
 	}
 
@@ -515,6 +533,46 @@ function groupContiguousLines(numbers: number[]): number[][] {
 	}
 	groups.push(current);
 	return groups;
+}
+
+function splitLinesByDefinitions(
+	lineNumbers: number[],
+	definitions: DefinitionHit[]
+): Array<{ definition?: DefinitionHit; lineNumbers: number[] }> {
+	if (lineNumbers.length === 0) {
+		return [];
+	}
+	const lineSet = new Set(lineNumbers);
+	const buckets: Array<{
+		definition?: DefinitionHit;
+		lineNumbers: number[];
+	}> = [];
+	const usedLines = new Set<number>();
+
+	for (const def of definitions) {
+		const lines = lineNumbers.filter(
+			line =>
+				isWithinRange(def.range, line) &&
+				lineSet.has(line)
+		);
+		if (lines.length === 0) {
+			continue;
+		}
+		lines.forEach(line => usedLines.add(line));
+		buckets.push({
+			definition: def,
+			lineNumbers: lines,
+		});
+	}
+
+	const remaining = lineNumbers.filter(
+		line => !usedLines.has(line)
+	);
+	if (remaining.length > 0) {
+		buckets.push({ lineNumbers: remaining });
+	}
+
+	return buckets;
 }
 
 type DefinitionRange = {
