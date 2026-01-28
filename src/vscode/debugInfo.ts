@@ -30,6 +30,21 @@ export class DebugInfoService {
 			this.channel.appendLine(
 				`Symbol: ${target.symbolName ?? 'unknown'}`
 			);
+			this.channel.appendLine(
+				`ChangeKind: ${target.changeKind ?? 'unknown'}`
+			);
+			this.channel.appendLine(
+				`Definition: ${target.definitionName ?? 'n/a'} (${target.definitionType ?? 'n/a'})`
+			);
+			this.channel.appendLine(
+				`QualifiedName: ${target.qualifiedName ?? 'n/a'}`
+			);
+			this.channel.appendLine(
+				`ElementKind: ${target.elementKind ?? 'n/a'}`
+			);
+			this.channel.appendLine(
+				`SegmentId: ${target.segmentId ?? 'n/a'}`
+			);
 
 			const relatedCalls = target.relatedCalls ?? [];
 			if (relatedCalls.length === 0) {

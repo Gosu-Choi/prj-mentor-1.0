@@ -179,9 +179,11 @@ export class TourGraphViewProvider
 				const pos = positions.get(node.id);
 				if (!pos) continue;
 				const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-				group.setAttribute('class', \`node \${node.kind} \${node.id === currentId ? 'active' : ''}\`);
+				const isCurrent = node.id === currentId || (node.steps || []).some(step => step.id === currentId);
+				group.setAttribute('class', \`node \${node.kind} \${isCurrent ? 'active' : ''}\`);
 				group.addEventListener('click', () => {
-					vscode.postMessage({ type: 'selectStep', id: node.id });
+					const first = node.steps && node.steps[0] ? node.steps[0].id : node.id;
+					vscode.postMessage({ type: 'selectStep', id: first });
 				});
 				const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
 				rect.setAttribute('x', pos.x);

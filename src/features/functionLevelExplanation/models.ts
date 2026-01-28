@@ -24,6 +24,7 @@ export interface ChangeUnit {
 		qualifiedName?: string;
 		range: LineRange;
 	}>;
+	segmentId?: string;
 	isOverall?: boolean;
 	elementKind?: 'function' | 'method' | 'class' | 'global';
 	qualifiedName?: string;

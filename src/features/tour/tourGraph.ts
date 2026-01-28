@@ -12,6 +12,12 @@ export interface TourGraphNode {
 	qualifiedName?: string;
 	isOverall?: boolean;
 	hidden?: boolean;
+	steps?: Array<{
+		id: string;
+		label: string;
+		startLine: number;
+		endLine: number;
+	}>;
 }
 
 export interface TourGraphEdge {
@@ -29,11 +35,77 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 	const mainSteps = steps.filter(step => step.type === 'main');
 	const nodes: TourGraphNode[] = [];
 	const nodeByStepId = new Map<string, TourGraphNode>();
+	const opGroupByKey = new Map<string, TourGraphNode>();
+	const opStepsByKey = new Map<
+		string,
+		Array<{
+			id: string;
+			label: string;
+			startLine: number;
+			endLine: number;
+			order: number;
+		}>
+	>();
+	const stepOrder = new Map<string, number>();
+
+	for (let i = 0; i < mainSteps.length; i += 1) {
+		stepOrder.set(mainSteps[i].id, i + 1);
+	}
 
 	for (let i = 0; i < mainSteps.length; i += 1) {
 		const step = mainSteps[i];
 		const target = step.target as ChangeUnit;
 		const kind = target.changeKind ?? 'unknown';
+		if (kind === 'operation') {
+			const identityRange = target.segmentId
+				? `segment:${target.segmentId}`
+				: target.definitionName
+					? `range:${target.range.startLine}-${target.range.endLine}`
+					: '';
+			const identityName =
+				target.qualifiedName ??
+				target.symbolName ??
+				target.definitionName ??
+				'';
+			const identity = identityRange || identityName || '';
+			const key = identity
+				? `op|${target.filePath}|${identity}`
+				: `op|${target.filePath}|range:${target.range.startLine}-${target.range.endLine}|${step.id}`;
+			let node = opGroupByKey.get(key);
+			if (!node) {
+				const label = target.symbolName ?? target.definitionName ?? 'Operation';
+				node = {
+					id: `op:${key}`,
+					index: i,
+					kind,
+					label,
+					filePath: target.filePath,
+					startLine: target.range.startLine,
+					endLine: target.range.endLine,
+					elementKind: target.elementKind,
+					qualifiedName: target.qualifiedName,
+					isOverall: target.isOverall,
+				};
+				opGroupByKey.set(key, node);
+				nodes.push(node);
+			} else {
+				node.startLine = Math.min(node.startLine, target.range.startLine);
+				node.endLine = Math.max(node.endLine, target.range.endLine);
+			}
+			const order = stepOrder.get(step.id) ?? i + 1;
+			const list = opStepsByKey.get(key) ?? [];
+			list.push({
+				id: step.id,
+				label: `Step ${order} · L${target.range.startLine}-${target.range.endLine}`,
+				startLine: target.range.startLine,
+				endLine: target.range.endLine,
+				order,
+			});
+			opStepsByKey.set(key, list);
+			nodeByStepId.set(step.id, node);
+			continue;
+		}
+
 		const label =
 			kind === 'definition'
 				? target.definitionName ?? target.symbolName ?? 'Definition'
@@ -51,9 +123,28 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 			elementKind: target.elementKind ?? (kind === 'global' ? 'global' : undefined),
 			qualifiedName: target.qualifiedName,
 			isOverall: target.isOverall,
+			steps: [
+				{
+					id: step.id,
+					label: `Step ${stepOrder.get(step.id) ?? i + 1} · L${target.range.startLine}-${target.range.endLine}`,
+					startLine: target.range.startLine,
+					endLine: target.range.endLine,
+				},
+			],
 		};
 		nodes.push(node);
 		nodeByStepId.set(step.id, node);
+	}
+
+	for (const [key, node] of opGroupByKey.entries()) {
+		const stepsForKey = opStepsByKey.get(key) ?? [];
+		stepsForKey.sort((a, b) => a.order - b.order);
+		node.steps = stepsForKey.map(step => ({
+			id: step.id,
+			label: step.label,
+			startLine: step.startLine,
+			endLine: step.endLine,
+		}));
 	}
 
 	const defByFileAndName = new Map<string, TourGraphNode[]>();
@@ -91,11 +182,11 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 	const edges: TourGraphEdge[] = [];
 	for (const step of mainSteps) {
 		const target = step.target as ChangeUnit;
-		const fromId = step.id;
-		const fromNode = nodeByStepId.get(fromId);
+		const fromNode = nodeByStepId.get(step.id);
 		if (!fromNode) {
 			continue;
 		}
+		const fromId = fromNode.id;
 
 		if (fromNode.kind === 'operation') {
 			for (const def of target.introducedDefinitions ?? []) {

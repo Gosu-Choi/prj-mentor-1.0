@@ -167,10 +167,48 @@ export class TourSidebarWebviewProvider
 			min-height: 260px;
 			resize: vertical;
 			overflow: hidden;
+			position: relative;
 		}
 		#graph {
 			width: 100%;
 			height: 100%;
+		}
+		.step-list {
+			position: absolute;
+			top: 8px;
+			right: 8px;
+			background: var(--vscode-editor-background);
+			border: 1px solid var(--vscode-input-border);
+			border-radius: 6px;
+			padding: 8px;
+			min-width: 180px;
+			max-width: 260px;
+			max-height: 60%;
+			overflow: auto;
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+			z-index: 2;
+		}
+		.step-list.hidden {
+			display: none;
+		}
+		.step-list h4 {
+			margin: 0 0 6px 0;
+			font-size: 12px;
+		}
+		.step-list button {
+			width: 100%;
+			text-align: left;
+			margin-bottom: 6px;
+		}
+		.step-list .close {
+			display: block;
+			margin-top: 4px;
+			font-size: 11px;
+			opacity: 0.8;
+			background: transparent;
+			border: none;
+			color: var(--vscode-foreground);
+			cursor: pointer;
 		}
 	</style>
 </head>
@@ -189,12 +227,14 @@ export class TourSidebarWebviewProvider
 	<div class="status" id="status"></div>
 	<div class="graph">
 		<div id="graph"></div>
+		<div id="stepList" class="step-list hidden"></div>
 	</div>
 	<script nonce="${nonce}" src="${visUri}"></script>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		const statusEl = document.getElementById('status');
 		const graphEl = document.getElementById('graph');
+		const stepListEl = document.getElementById('stepList');
 		let network = null;
 		let currentGraph = null;
 		const savedPositionsByKey = new Map();
@@ -252,6 +292,7 @@ export class TourSidebarWebviewProvider
 			const nodes = graph.nodes.map(node => {
 				const key = buildNodeKey(node);
 				const pos = savedPositionsByKey.get(key);
+				const isCurrent = node.id === currentId || (node.steps || []).some(step => step.id === currentId);
 				return {
 					id: node.id,
 					label: node.kind === 'operation' && !node.isOverall ? '' : node.label,
@@ -264,11 +305,12 @@ export class TourSidebarWebviewProvider
 								? '#3b82f6'
 								: '#6b7280',
 					font: { color: 'var(--vscode-foreground)', size: 11 },
-					borderWidth: node.id === currentId ? 2 : 1,
+					borderWidth: isCurrent ? 2 : 1,
 					shape: 'dot',
 					size: node.id === currentId ? 14 : 10,
 					x: pos ? pos.x : undefined,
-					y: pos ? pos.y : undefined
+					y: pos ? pos.y : undefined,
+					steps: node.steps
 				};
 			});
 			const edges = graph.edges
@@ -320,7 +362,15 @@ export class TourSidebarWebviewProvider
 				});
 				network.on('click', params => {
 					if (params.nodes && params.nodes.length > 0) {
-						vscode.postMessage({ type: 'selectStep', id: params.nodes[0] });
+						const nodeId = params.nodes[0];
+						const node = (currentGraph?.nodes || []).find(entry => entry.id === nodeId);
+						if (node && node.steps && node.steps.length > 1) {
+							showStepList(node.steps);
+							return;
+						}
+						hideStepList();
+						const stepId = node?.steps?.[0]?.id ?? nodeId;
+						vscode.postMessage({ type: 'selectStep', id: stepId });
 					}
 				});
 				network.on('oncontext', params => {
@@ -387,6 +437,33 @@ export class TourSidebarWebviewProvider
 					});
 				}
 			}
+		}
+
+		function showStepList(steps) {
+			stepListEl.classList.remove('hidden');
+			stepListEl.innerHTML = '';
+			const title = document.createElement('h4');
+			title.textContent = 'Changes in this element';
+			stepListEl.appendChild(title);
+			steps.forEach(step => {
+				const button = document.createElement('button');
+				button.textContent = step.label;
+				button.addEventListener('click', () => {
+					hideStepList();
+					vscode.postMessage({ type: 'selectStep', id: step.id });
+				});
+				stepListEl.appendChild(button);
+			});
+			const close = document.createElement('button');
+			close.textContent = 'Close';
+			close.className = 'close';
+			close.addEventListener('click', () => hideStepList());
+			stepListEl.appendChild(close);
+		}
+
+		function hideStepList() {
+			stepListEl.classList.add('hidden');
+			stepListEl.innerHTML = '';
 		}
 
 		function buildNodeKey(node) {

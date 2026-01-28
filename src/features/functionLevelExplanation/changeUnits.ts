@@ -114,26 +114,31 @@ export async function splitChangeUnitsByDefinitions(
 			analysisCache,
 			fileTextCache
 		);
+		let sourceText = analysis?.sourceText;
+		if (!sourceText && language) {
+			const absolute = path.isAbsolute(unit.filePath)
+				? unit.filePath
+				: path.join(workspaceRoot, unit.filePath);
+			try {
+				sourceText = await readFileCached(absolute, fileTextCache);
+			} catch {
+				sourceText = undefined;
+			}
+		}
 		const addedLines = collectAddedLines(unit.diffText);
+		const analysisDefinitions = analysis?.definitions ?? [];
 		const definitions = language
 			? findDefinitions(
 					addedLines,
 					language,
-					analysis?.definitions ?? [],
-					analysis?.sourceText,
+					analysisDefinitions,
+					sourceText,
 					analysis?.tsSourceFile
 				)
 			: [];
 		const changeType = classifyChange(unit.diffText);
 
-		if (definitions.length === 0) {
-			unit.changeKind = 'operation';
-			unit.changeType = changeType;
-			result.push(unit);
-			continue;
-		}
-
-		const definitionRanges = definitions.map(def => def.range);
+		const definitionHitRanges = definitions.map(def => def.range);
 		const definitionLineNumbers = new Set(
 			definitions.map(def => def.lineNumber)
 		);
@@ -173,7 +178,7 @@ export async function splitChangeUnitsByDefinitions(
 
 		const operationalAddedLines = addedLines.filter(line =>
 			!definitionLineNumbers.has(line.lineNumber) &&
-			!definitionRanges.some(range =>
+			!definitionHitRanges.some(range =>
 				isWithinRange(range, line.lineNumber)
 			) &&
 			isMeaningfulAddedLine(line.text, language)
@@ -184,6 +189,32 @@ export async function splitChangeUnitsByDefinitions(
 		const operationalGroups = groupContiguousLines(
 			operationalLineNumbers
 		);
+		if (definitions.length === 0 && operationalGroups.length === 0) {
+			const enclosing = findEnclosingDefinition(
+				language,
+				analysisDefinitions,
+				unit.range.startLine,
+				sourceText
+			);
+			result.push({
+				...unit,
+				changeKind: 'operation',
+				changeType,
+				elementKind:
+					unit.elementKind ??
+					(enclosing ? mapDefinitionKind(enclosing.kind) as ChangeUnit['elementKind'] : undefined),
+				symbolName:
+					enclosing?.name ?? unit.symbolName,
+				qualifiedName:
+					enclosing?.qualifiedName ?? unit.qualifiedName,
+				definitionName:
+					enclosing?.name ?? unit.definitionName,
+				definitionType:
+					enclosing?.kind ? mapDefinitionKind(enclosing.kind) : unit.definitionType,
+				segmentId: enclosing ? buildSegmentId(unit.filePath, enclosing) : unit.segmentId,
+			});
+			continue;
+		}
 		for (const group of operationalGroups) {
 			const groupRange = {
 				startLine: group[0],
@@ -194,6 +225,12 @@ export async function splitChangeUnitsByDefinitions(
 				definitions
 			);
 			if (byDefinition.length === 0) {
+				const enclosing = findEnclosingDefinition(
+					language,
+					analysisDefinitions,
+					groupRange.startLine,
+					sourceText
+				);
 				const operationalDiff = filterDiffTextByAddedLineNumbers(
 					unit.diffText,
 					new Set(group),
@@ -205,12 +242,29 @@ export async function splitChangeUnitsByDefinitions(
 					diffText: operationalDiff,
 					changeKind: 'operation',
 					changeType,
-					elementKind: unit.elementKind,
+					elementKind:
+						unit.elementKind ??
+						(enclosing ? mapDefinitionKind(enclosing.kind) as ChangeUnit['elementKind'] : undefined),
+					symbolName:
+						enclosing?.name ?? unit.symbolName,
+					qualifiedName:
+						enclosing?.qualifiedName ?? unit.qualifiedName,
+					definitionName:
+						enclosing?.name ?? unit.definitionName,
+					definitionType:
+						enclosing?.kind ? mapDefinitionKind(enclosing.kind) : unit.definitionType,
+					segmentId: enclosing ? buildSegmentId(unit.filePath, enclosing) : unit.segmentId,
 				});
 				continue;
 			}
 
 			for (const chunk of byDefinition) {
+				const enclosing = findEnclosingDefinition(
+					language,
+					analysisDefinitions,
+					chunk.lineNumbers[0],
+					sourceText
+				);
 				const operationalDiff = filterDiffTextByAddedLineNumbers(
 					unit.diffText,
 					new Set(chunk.lineNumbers),
@@ -227,8 +281,18 @@ export async function splitChangeUnitsByDefinitions(
 					diffText: operationalDiff,
 					changeKind: 'operation',
 					changeType,
-					elementKind: unit.elementKind,
-					symbolName: chunk.definition?.name ?? unit.symbolName,
+					elementKind:
+						unit.elementKind ??
+						(enclosing ? mapDefinitionKind(enclosing.kind) as ChangeUnit['elementKind'] : undefined),
+					symbolName:
+						enclosing?.name ?? unit.symbolName,
+					qualifiedName:
+						enclosing?.qualifiedName ?? unit.qualifiedName,
+					definitionName:
+						enclosing?.name ?? unit.definitionName,
+					definitionType:
+						enclosing?.kind ? mapDefinitionKind(enclosing.kind) : unit.definitionType,
+					segmentId: enclosing ? buildSegmentId(unit.filePath, enclosing) : unit.segmentId,
 				});
 			}
 		}
@@ -579,6 +643,7 @@ type DefinitionRange = {
 	name: string;
 	range: LineRange;
 	kind?: 'function' | 'method' | 'class';
+	qualifiedName?: string;
 };
 
 async function getDefinitionsForFile(
@@ -613,6 +678,7 @@ async function getDefinitionsForFile(
 			name: def.name,
 			range: def.range,
 			kind: def.kind,
+			qualifiedName: def.qualifiedName,
 		})) ?? [];
 		const tsSourceFile =
 			language === 'javascript' || language === 'typescript'
@@ -675,6 +741,86 @@ function isWithinRange(range: LineRange, lineNumber: number): boolean {
 
 function rangesOverlap(a: LineRange, b: LineRange): boolean {
 	return a.startLine <= b.endLine && b.startLine <= a.endLine;
+}
+
+function buildSegmentId(
+	filePath: string,
+	definition: DefinitionRange
+): string {
+	return `${filePath}|${definition.range.startLine}-${definition.range.endLine}`;
+}
+
+function findEnclosingDefinitionRange(
+	definitions: DefinitionRange[],
+	lineNumber: number
+): DefinitionRange | undefined {
+	const candidates = definitions.filter(def =>
+		isWithinRange(def.range, lineNumber)
+	);
+	if (candidates.length === 0) {
+		return undefined;
+	}
+	return candidates.reduce((best, current) => {
+		const bestSpan = best.range.endLine - best.range.startLine;
+		const currentSpan = current.range.endLine - current.range.startLine;
+		return currentSpan < bestSpan ? current : best;
+	});
+}
+
+function findEnclosingDefinition(
+	language: 'javascript' | 'typescript' | 'python' | undefined,
+	definitions: DefinitionRange[],
+	lineNumber: number,
+	sourceText: string | undefined
+): DefinitionRange | undefined {
+	const enclosing = findEnclosingDefinitionRange(definitions, lineNumber);
+	if (enclosing) {
+		return enclosing;
+	}
+	if (language === 'python' && sourceText) {
+		return findPythonEnclosingDefinition(sourceText, lineNumber);
+	}
+	return undefined;
+}
+
+function findPythonEnclosingDefinition(
+	sourceText: string,
+	lineNumber: number
+): DefinitionRange | undefined {
+	const lines = sourceText.split(/\r?\n/);
+	const startIndex = Math.min(lines.length - 1, Math.max(0, lineNumber - 1));
+	for (let i = startIndex; i >= 0; i -= 1) {
+		const raw = lines[i] ?? '';
+		if (!raw.trim() || raw.trim().startsWith('#')) {
+			continue;
+		}
+		const match = /^\s*(async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(raw);
+		if (!match) {
+			continue;
+		}
+		const kind = match[1] === 'class' ? 'class' : 'function';
+		const indent = raw.match(/^\s*/)?.[0] ?? '';
+		const indentLength = indent.length;
+		let endLine = i + 1;
+		for (let j = i + 1; j < lines.length; j += 1) {
+			const next = lines[j] ?? '';
+			if (!next.trim() || next.trim().startsWith('#')) {
+				continue;
+			}
+			const nextIndent = next.match(/^\s*/)?.[0] ?? '';
+			if (nextIndent.length <= indentLength) {
+				endLine = j;
+				break;
+			}
+			endLine = j + 1;
+		}
+		return {
+			name: match[2],
+			range: { startLine: i + 1, endLine },
+			kind,
+		};
+	}
+	return undefined;
 }
 
 type FileAnalysis = {
