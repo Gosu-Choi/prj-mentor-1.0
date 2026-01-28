@@ -7,6 +7,7 @@ export class TourController {
 	private currentIndex = -1;
 	private status: TourState['status'] = 'idle';
 	private showBackground = true;
+	private showGlobals = true;
 	private listeners = new Set<Listener>();
 
 	setSteps(steps: TourStep[]): void {
@@ -29,7 +30,10 @@ export class TourController {
 		}
 		this.status = 'running';
 		let nextIndex = index;
-		if (!this.showBackground && this.steps[nextIndex]?.type === 'background') {
+		if (
+			(!this.showBackground && this.steps[nextIndex]?.type === 'background') ||
+			(!this.showGlobals && isGlobalStep(this.steps[nextIndex]))
+		) {
 			nextIndex = this.findNextIndex(nextIndex, 1);
 			if (nextIndex < 0) {
 				return;
@@ -101,6 +105,7 @@ export class TourController {
 			currentIndex: this.currentIndex,
 			status: this.status,
 			showBackground: this.showBackground,
+			showGlobals: this.showGlobals,
 		};
 	}
 
@@ -133,11 +138,31 @@ export class TourController {
 		this.setShowBackground(!this.showBackground);
 	}
 
+	setShowGlobals(value: boolean): void {
+		this.showGlobals = value;
+		if (this.status === 'running') {
+			const current = this.getCurrentStep();
+			if (current && isGlobalStep(current) && !value) {
+				this.currentIndex = this.findNextIndex(this.currentIndex, 1);
+			}
+		}
+		this.emit();
+	}
+
+	toggleShowGlobals(): void {
+		this.setShowGlobals(!this.showGlobals);
+	}
+
 	private findNextIndex(start: number, direction: 1 | -1): number {
 		let index = start + direction;
 		while (index >= 0 && index < this.steps.length) {
 			const step = this.steps[index];
-			if (this.showBackground || step.type !== 'background') {
+			const isBackground = step.type === 'background';
+			const isGlobal = isGlobalStep(step);
+			if (
+				(this.showBackground || !isBackground) &&
+				(this.showGlobals || !isGlobal)
+			) {
 				return index;
 			}
 			index += direction;
@@ -151,4 +176,14 @@ export class TourController {
 			listener(state);
 		}
 	}
+}
+
+function isGlobalStep(step: TourStep): boolean {
+	if (step.type !== 'main') {
+		return false;
+	}
+	if (!('diffText' in step.target)) {
+		return false;
+	}
+	return step.target.changeKind === 'global';
 }

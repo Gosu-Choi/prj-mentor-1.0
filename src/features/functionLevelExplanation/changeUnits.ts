@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import * as ts from 'typescript';
 import { ChangeUnit, LineRange } from './models';
 import { detectLanguageFromPath } from '../ast/language';
 import { TreeSitterAnalyzer } from '../ast/treeSitterAnalyzer';
@@ -99,8 +100,9 @@ export async function splitChangeUnitsByDefinitions(
 	const analyzer = new TreeSitterAnalyzer();
 	const analysisCache = new Map<
 		string,
-		{ language: 'javascript' | 'typescript' | 'python' | undefined; definitions: DefinitionRange[] }
+		FileAnalysis
 	>();
+	const fileTextCache = new Map<string, string>();
 
 	for (const unit of units) {
 		const language = detectLanguageFromPath(unit.filePath);
@@ -109,15 +111,24 @@ export async function splitChangeUnitsByDefinitions(
 			workspaceRoot,
 			language,
 			analyzer,
-			analysisCache
+			analysisCache,
+			fileTextCache
 		);
 		const addedLines = collectAddedLines(unit.diffText);
 		const definitions = language
-			? findDefinitions(addedLines, language, analysis?.definitions ?? [])
+			? findDefinitions(
+					addedLines,
+					language,
+					analysis?.definitions ?? [],
+					analysis?.sourceText,
+					analysis?.tsSourceFile
+				)
 			: [];
+		const changeType = classifyChange(unit.diffText);
 
 		if (definitions.length === 0) {
 			unit.changeKind = 'operation';
+			unit.changeType = changeType;
 			result.push(unit);
 			continue;
 		}
@@ -136,13 +147,19 @@ export async function splitChangeUnitsByDefinitions(
 				),
 				true
 			);
+			const changeKind =
+				def.type === 'global-variable'
+					? 'global'
+					: 'definition';
 			result.push({
 				...unit,
 				range: { ...def.range },
 				diffText: defDiff,
-				changeKind: 'definition',
+				changeKind,
+				changeType,
 				definitionName: def.name,
-				definitionType: def.type,
+				definitionType:
+					def.type === 'global-variable' ? 'variable' : def.type,
 			});
 		}
 
@@ -165,17 +182,25 @@ export async function splitChangeUnitsByDefinitions(
 				new Set(group),
 				false
 			);
+			const groupRange = {
+				startLine: group[0],
+				endLine: group[group.length - 1],
+			};
+			const relevantDefinitions = definitions.filter(def =>
+				rangesOverlap(def.range, groupRange)
+			);
 			result.push({
 				...unit,
-				range: {
-					startLine: group[0],
-					endLine: group[group.length - 1],
-				},
+				range: groupRange,
 				diffText: operationalDiff,
 				changeKind: 'operation',
-				introducedDefinitions: definitions.map(def => ({
+				changeType,
+				introducedDefinitions: relevantDefinitions.map(def => ({
 					name: def.name,
-					type: def.type,
+					type:
+						def.type === 'global-variable'
+							? 'variable'
+							: def.type,
 					range: { ...def.range },
 				})),
 			});
@@ -284,27 +309,92 @@ type DefinitionHit = {
 function findDefinitions(
 	addedLines: AddedLine[],
 	language: 'javascript' | 'typescript' | 'python',
-	definitions: DefinitionRange[]
+	definitions: DefinitionRange[],
+	sourceText: string | undefined,
+	tsSourceFile: ts.SourceFile | undefined
 ): DefinitionHit[] {
 	const results: DefinitionHit[] = [];
+	const addedLineSet = new Set(addedLines.map(line => line.lineNumber));
+	const addedLineText = new Map(
+		addedLines.map(line => [line.lineNumber, line.text])
+	);
+	const existingKeys = new Set<string>();
 	for (const line of addedLines) {
 		const hit = detectDefinition(line.text, language);
 		if (hit) {
-			const range = resolveDefinitionRange(
+			let isGlobal = false;
+			if (hit.type === 'variable') {
+				isGlobal = isGlobalVariable(
+					language,
+					definitions,
+					sourceText,
+					tsSourceFile,
+					line.lineNumber
+				);
+				if (!isGlobal) {
+					continue;
+				}
+			}
+			const resolved = resolveDefinitionRange(
 				definitions,
 				hit.name,
-				line.lineNumber
+				line.lineNumber,
+				hit.type
 			);
+			let range = resolved.range;
+			let type =
+				hit.type === 'variable' && isGlobal
+					? 'global-variable'
+					: resolved.kind ?? hit.type;
+
+			if (type === 'global-variable') {
+				const variableRange = resolveVariableRange(
+					language,
+					sourceText,
+					tsSourceFile,
+					line.lineNumber
+				);
+				if (variableRange) {
+					range = variableRange;
+				}
+			}
 			if (range.startLine !== line.lineNumber) {
 				continue;
 			}
+			const key = `${hit.name}|${range.startLine}-${range.endLine}|${type}`;
+			if (existingKeys.has(key)) {
+				continue;
+			}
+			existingKeys.add(key);
 			results.push({
 				lineNumber: line.lineNumber,
 				name: hit.name,
-				type: hit.type,
+				type,
 				range,
 			});
 		}
+	}
+
+	for (const def of definitions) {
+		if (!addedLineSet.has(def.range.startLine)) {
+			continue;
+		}
+		const lineText = addedLineText.get(def.range.startLine) ?? '';
+		if (!lineContainsIdentifier(lineText, def.name)) {
+			continue;
+		}
+		const type = mapDefinitionKind(def.kind);
+		const key = `${def.name}|${def.range.startLine}-${def.range.endLine}|${type}`;
+		if (existingKeys.has(key)) {
+			continue;
+		}
+		existingKeys.add(key);
+		results.push({
+			lineNumber: def.range.startLine,
+			name: def.name,
+			type,
+			range: def.range,
+		});
 	}
 	return results;
 }
@@ -319,6 +409,9 @@ function detectDefinition(
 	}
 
 	if (language === 'python') {
+		if (/^(from|import)\s+/.test(text)) {
+			return null;
+		}
 		const asyncDef = /^async\s+def\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(text);
 		if (asyncDef) {
 			return { name: asyncDef[1], type: 'function' };
@@ -418,6 +511,7 @@ function groupContiguousLines(numbers: number[]): number[][] {
 type DefinitionRange = {
 	name: string;
 	range: LineRange;
+	kind?: 'function' | 'method' | 'class';
 };
 
 async function getDefinitionsForFile(
@@ -427,16 +521,18 @@ async function getDefinitionsForFile(
 	analyzer: TreeSitterAnalyzer,
 	cache: Map<
 		string,
-		{ language: 'javascript' | 'typescript' | 'python' | undefined; definitions: DefinitionRange[] }
+		FileAnalysis
 	>
-): Promise<{ language: typeof language; definitions: DefinitionRange[] } | undefined> {
+	,
+	textCache: Map<string, string>
+): Promise<FileAnalysis | undefined> {
 	const key = path.normalize(filePath);
 	const cached = cache.get(key);
 	if (cached) {
 		return cached;
 	}
 	if (!language) {
-		const empty = { language, definitions: [] };
+		const empty: FileAnalysis = { language, definitions: [] };
 		cache.set(key, empty);
 		return empty;
 	}
@@ -444,17 +540,32 @@ async function getDefinitionsForFile(
 		? filePath
 		: path.join(workspaceRoot, filePath);
 	try {
-		const text = await fs.readFile(absolute, 'utf8');
+		const text = await readFileCached(absolute, textCache);
 		const analysis = await analyzer.analyzeFile(filePath, text);
 		const definitions = analysis?.functions.map(def => ({
 			name: def.name,
 			range: def.range,
+			kind: def.kind,
 		})) ?? [];
-		const payload = { language, definitions };
+		const tsSourceFile =
+			language === 'javascript' || language === 'typescript'
+				? ts.createSourceFile(
+						absolute,
+						text,
+						ts.ScriptTarget.Latest,
+						true
+					)
+				: undefined;
+		const payload: FileAnalysis = {
+			language,
+			definitions,
+			sourceText: text,
+			tsSourceFile,
+		};
 		cache.set(key, payload);
 		return payload;
 	} catch {
-		const empty = { language, definitions: [] };
+		const empty: FileAnalysis = { language, definitions: [] };
 		cache.set(key, empty);
 		return empty;
 	}
@@ -463,26 +574,350 @@ async function getDefinitionsForFile(
 function resolveDefinitionRange(
 	definitions: DefinitionRange[],
 	name: string,
-	lineNumber: number
-): LineRange {
+	lineNumber: number,
+	expectedType?: string
+): { range: LineRange; kind?: string; isGlobal?: boolean } {
+	const expectedKind = expectedType
+		? normalizeDefinitionKind(expectedType)
+		: undefined;
 	const containing = definitions.filter(def =>
 		isWithinRange(def.range, lineNumber)
 	);
 	if (containing.length > 0) {
-		const best = containing.reduce((prev, current) => {
+		const ranked = expectedKind
+			? containing.filter(def => def.kind === expectedKind)
+			: containing;
+		const candidates = ranked.length > 0 ? ranked : containing;
+		const best = candidates.reduce((prev, current) => {
 			const prevSpan = prev.range.endLine - prev.range.startLine;
 			const currSpan = current.range.endLine - current.range.startLine;
 			return currSpan < prevSpan ? current : prev;
 		});
-		return best.range;
+		return { range: best.range, kind: best.kind };
 	}
 	const named = definitions.filter(def => def.name === name);
 	if (named.length > 0) {
-		return named[0].range;
+		return { range: named[0].range, kind: named[0].kind };
 	}
-	return { startLine: lineNumber, endLine: lineNumber };
+	return { range: { startLine: lineNumber, endLine: lineNumber } };
 }
 
 function isWithinRange(range: LineRange, lineNumber: number): boolean {
 	return range.startLine <= lineNumber && lineNumber <= range.endLine;
+}
+
+function rangesOverlap(a: LineRange, b: LineRange): boolean {
+	return a.startLine <= b.endLine && b.startLine <= a.endLine;
+}
+
+type FileAnalysis = {
+	language: 'javascript' | 'typescript' | 'python' | undefined;
+	definitions: DefinitionRange[];
+	sourceText?: string;
+	tsSourceFile?: ts.SourceFile;
+};
+
+async function readFileCached(
+	absolutePath: string,
+	cache: Map<string, string>
+): Promise<string> {
+	const cached = cache.get(absolutePath);
+	if (cached !== undefined) {
+		return cached;
+	}
+	const text = await fs.readFile(absolutePath, 'utf8');
+	cache.set(absolutePath, text);
+	return text;
+}
+
+function isGlobalVariable(
+	language: 'javascript' | 'typescript' | 'python',
+	definitions: DefinitionRange[],
+	sourceText: string | undefined,
+	tsSourceFile: ts.SourceFile | undefined,
+	lineNumber: number
+): boolean {
+	const inDefinition = definitions.some(def =>
+		isWithinRange(def.range, lineNumber)
+	);
+	if (inDefinition) {
+		return false;
+	}
+	if (language === 'python') {
+		return true;
+	}
+	if (language === 'javascript' || language === 'typescript') {
+		if (!tsSourceFile || !sourceText) {
+			return true;
+		}
+		return isTopLevelVariableInTsAst(tsSourceFile, lineNumber);
+	}
+	return false;
+}
+
+function isTopLevelVariableInTsAst(
+	sourceFile: ts.SourceFile,
+	lineNumber: number
+): boolean {
+	const position = ts.getPositionOfLineAndCharacter(
+		sourceFile,
+		Math.max(0, lineNumber - 1),
+		0
+	);
+	let isTopLevel = false;
+
+	const visit = (node: ts.Node) => {
+		if (position < node.pos || position > node.end) {
+			return;
+		}
+		if (ts.isVariableDeclaration(node)) {
+			let parent: ts.Node | undefined = node.parent;
+			while (
+				parent &&
+				!ts.isSourceFile(parent) &&
+				!ts.isFunctionLike(parent) &&
+				!ts.isClassLike(parent)
+			) {
+				parent = parent.parent;
+			}
+			if (parent && ts.isSourceFile(parent)) {
+				isTopLevel = true;
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+
+	visit(sourceFile);
+	return isTopLevel;
+}
+
+function resolveVariableRange(
+	language: 'javascript' | 'typescript' | 'python',
+	sourceText: string | undefined,
+	tsSourceFile: ts.SourceFile | undefined,
+	startLine: number
+): LineRange | undefined {
+	if (!sourceText) {
+		return undefined;
+	}
+	if (language === 'python') {
+		const lines = sourceText.split(/\r?\n/);
+		const stringRange = scanPythonStringRange(lines, startLine);
+		if (stringRange) {
+			return stringRange;
+		}
+		return scanBracketRange(lines, startLine, 'python');
+	}
+	if (language === 'javascript' || language === 'typescript') {
+		if (tsSourceFile) {
+			const range = findVariableRangeInTsAst(tsSourceFile, startLine);
+			if (range) {
+				return range;
+			}
+		}
+		const lines = sourceText.split(/\r?\n/);
+		return scanBracketRange(lines, startLine, 'javascript');
+	}
+	return undefined;
+}
+
+function findVariableRangeInTsAst(
+	sourceFile: ts.SourceFile,
+	line: number
+): LineRange | undefined {
+	const position = ts.getPositionOfLineAndCharacter(
+		sourceFile,
+		Math.max(0, line - 1),
+		0
+	);
+	let best:
+		| { start: number; end: number }
+		| undefined;
+
+	const visit = (node: ts.Node) => {
+		if (position < node.pos || position > node.end) {
+			return;
+		}
+		if (ts.isVariableDeclaration(node)) {
+			const start = node.getStart(sourceFile, false);
+			const end = node.initializer?.end ?? node.end;
+			const span = end - start;
+			if (!best || span < best.end - best.start) {
+				best = { start, end };
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+
+	visit(sourceFile);
+	if (!best) {
+		return undefined;
+	}
+	const startLine = ts.getLineAndCharacterOfPosition(sourceFile, best.start).line + 1;
+	const endLine = ts.getLineAndCharacterOfPosition(sourceFile, best.end).line + 1;
+	return { startLine, endLine };
+}
+
+function scanBracketRange(
+	lines: string[],
+	startLine: number,
+	language: 'python' | 'javascript'
+): LineRange | undefined {
+	const startIndex = Math.max(0, startLine - 1);
+	let balance = 0;
+	let endLine = startLine;
+	for (let i = startIndex; i < lines.length; i += 1) {
+		const raw = lines[i];
+		const text = sanitizeForBracketScan(raw, language);
+		for (const char of text) {
+			switch (char) {
+				case '{':
+				case '[':
+				case '(':
+					balance += 1;
+					break;
+				case '}':
+				case ']':
+				case ')':
+					balance -= 1;
+					break;
+				default:
+					break;
+			}
+		}
+		endLine = i + 1;
+		const trimmed = raw.trim();
+		const hasContinuation =
+			language === 'python' ? trimmed.endsWith('\\') : false;
+		if (balance <= 0 && !hasContinuation && i !== startIndex) {
+			break;
+		}
+		if (balance <= 0 && i === startIndex) {
+			break;
+		}
+	}
+	return { startLine, endLine };
+}
+
+function scanPythonStringRange(
+	lines: string[],
+	startLine: number
+): LineRange | undefined {
+	const startIndex = Math.max(0, startLine - 1);
+	const firstLine = lines[startIndex] ?? '';
+	const triple = findTripleQuote(firstLine);
+	if (!triple) {
+		return undefined;
+	}
+	const sameLineClosing = hasClosingTriple(firstLine, triple, firstLine.indexOf(triple) + 3);
+	if (sameLineClosing) {
+		return { startLine, endLine: startLine };
+	}
+	for (let i = startIndex + 1; i < lines.length; i += 1) {
+		if (hasClosingTriple(lines[i] ?? '', triple, 0)) {
+			return { startLine, endLine: i + 1 };
+		}
+	}
+	return { startLine, endLine: lines.length };
+}
+
+function findTripleQuote(line: string): `"""` | `'''` | undefined {
+	const dbl = line.indexOf('"""');
+	const sng = line.indexOf("'''");
+	if (dbl < 0 && sng < 0) {
+		return undefined;
+	}
+	if (dbl >= 0 && sng >= 0) {
+		return dbl < sng ? '"""' : "'''";
+	}
+	return dbl >= 0 ? '"""' : "'''";
+}
+
+function hasClosingTriple(
+	line: string,
+	triple: `"""` | `'''`,
+	fromIndex: number
+): boolean {
+	return line.indexOf(triple, fromIndex) >= 0;
+}
+
+function sanitizeForBracketScan(
+	line: string,
+	language: 'python' | 'javascript'
+): string {
+	let text = line;
+	if (language === 'python') {
+		const hash = text.indexOf('#');
+		if (hash >= 0) {
+			text = text.slice(0, hash);
+		}
+	}
+	text = text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
+	return text;
+}
+
+function mapDefinitionKind(kind: DefinitionRange['kind']): string {
+	switch (kind) {
+		case 'class':
+			return 'class';
+		case 'method':
+			return 'method';
+		case 'function':
+		default:
+			return 'function';
+	}
+}
+
+function normalizeDefinitionKind(
+	type: string
+): DefinitionRange['kind'] | undefined {
+	switch (type) {
+		case 'class':
+			return 'class';
+		case 'method':
+			return 'method';
+		case 'function':
+			return 'function';
+		default:
+			return undefined;
+	}
+}
+
+function lineContainsIdentifier(
+	text: string,
+	identifier: string
+): boolean {
+	if (!text || !identifier) {
+		return false;
+	}
+	const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const pattern = new RegExp(`\\b${escaped}\\b`);
+	return pattern.test(text);
+}
+
+type ChangeType = 'add' | 'remove' | 'modify' | 'unknown';
+
+function classifyChange(diffText: string): ChangeType {
+	let hasAdd = false;
+	let hasRemove = false;
+	for (const line of diffText.split(/\r?\n/)) {
+		if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) {
+			continue;
+		}
+		if (line.startsWith('+')) {
+			hasAdd = true;
+		} else if (line.startsWith('-')) {
+			hasRemove = true;
+		}
+	}
+	if (hasAdd && hasRemove) {
+		return 'modify';
+	}
+	if (hasAdd) {
+		return 'add';
+	}
+	if (hasRemove) {
+		return 'remove';
+	}
+	return 'unknown';
 }

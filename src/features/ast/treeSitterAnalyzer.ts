@@ -174,7 +174,9 @@ class AstVisitor {
 		if (!name) {
 			return;
 		}
-		this.addFunctionDefinition(name, node, 'function');
+		const isMethod =
+			this.language === 'python' && this.classStack.length > 0;
+		this.addFunctionDefinition(name, node, isMethod ? 'method' : 'function');
 	}
 
 	private recordMethodDefinition(node: TreeSitter.Node): void {

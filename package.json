@@ -14,6 +14,7 @@
     "onCommand:mentor.nextStep",
     "onCommand:mentor.previousStep",
     "onCommand:mentor.stopTour",
+    "onCommand:mentor.toggleGlobals",
     "onView:mentor.intentView",
     "onView:mentor.tourSidebar"
   ],
@@ -70,6 +71,10 @@
       {
         "command": "mentor.toggleBackgroundTour",
         "title": "MENTOR: Toggle Background Tour"
+      },
+      {
+        "command": "mentor.toggleGlobals",
+        "title": "MENTOR: Toggle Global Variables"
       },
       {
         "command": "mentor.showDebugInfo",

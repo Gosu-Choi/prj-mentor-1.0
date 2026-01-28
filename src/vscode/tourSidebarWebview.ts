@@ -48,6 +48,9 @@ export class TourSidebarWebviewProvider
 				case 'toggleBackground':
 					this.controller.toggleShowBackground();
 					break;
+				case 'toggleGlobals':
+					this.controller.toggleShowGlobals();
+					break;
 				case 'clear':
 					await vscode.commands.executeCommand('mentor.clearExplanations');
 					break;
@@ -82,11 +85,15 @@ export class TourSidebarWebviewProvider
 		}
 		const state = this.controller.getState();
 		const step = this.controller.getCurrentStep();
-		const graph = buildTourGraph(state.steps);
+		const graph = applyGlobalVisibility(
+			buildTourGraph(state.steps),
+			state.showGlobals
+		);
 		this.view.webview.postMessage({
 			type: 'update',
 			status: state.status,
 			showBackground: state.showBackground,
+			showGlobals: state.showGlobals,
 			currentIndex: state.currentIndex,
 			total: state.steps.length,
 			stepLabel: step ? formatStepLabel(state.currentIndex, state.steps.length, step) : 'No active step.',
@@ -163,6 +170,7 @@ export class TourSidebarWebviewProvider
 		<button id="prev">Previous</button>
 		<button id="next">Next</button>
 		<button id="toggle" class="secondary">Toggle Background</button>
+		<button id="toggleGlobals" class="secondary">Toggle Globals</button>
 		<button id="clear" class="secondary">Clear Explanations</button>
 		<button id="debug" class="secondary">Debug Info</button>
 	</div>
@@ -182,29 +190,38 @@ export class TourSidebarWebviewProvider
 		document.getElementById('prev').addEventListener('click', () => vscode.postMessage({ type: 'previous' }));
 		document.getElementById('next').addEventListener('click', () => vscode.postMessage({ type: 'next' }));
 		document.getElementById('toggle').addEventListener('click', () => vscode.postMessage({ type: 'toggleBackground' }));
+		document.getElementById('toggleGlobals').addEventListener('click', () => vscode.postMessage({ type: 'toggleGlobals' }));
 		document.getElementById('clear').addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
 		document.getElementById('debug').addEventListener('click', () => vscode.postMessage({ type: 'debug' }));
 
 		function renderGraph(graph, currentId) {
+			const visibleIds = new Set(
+				graph.nodes.filter(node => !node.hidden).map(node => node.id)
+			);
 			const nodes = graph.nodes.map(node => ({
 				id: node.id,
 				label: node.kind === 'operation' ? '' : node.label,
+				hidden: node.hidden === true,
 				color: node.kind === 'definition'
 					? '#f59e0b'
-					: node.kind === 'operation'
-						? '#3b82f6'
-						: '#6b7280',
+					: node.kind === 'global'
+						? '#22c55e'
+						: node.kind === 'operation'
+							? '#3b82f6'
+							: '#6b7280',
 				font: { color: 'var(--vscode-foreground)', size: 11 },
 				borderWidth: node.id === currentId ? 2 : 1,
 				shape: 'dot',
 				size: node.id === currentId ? 14 : 10
 			}));
-			const edges = graph.edges.map(edge => ({
-				from: edge.from,
-				to: edge.to,
-				color: edge.type === 'def-to-def' ? '#f59e0b' : '#3b82f6',
-				arrows: 'to'
-			}));
+			const edges = graph.edges
+				.filter(edge => visibleIds.has(edge.from) && visibleIds.has(edge.to))
+				.map(edge => ({
+					from: edge.from,
+					to: edge.to,
+					color: edge.type === 'def-to-def' ? '#f59e0b' : '#3b82f6',
+					arrows: 'to'
+				}));
 
 			const previousPositions = network ? network.getPositions() : {};
 			const previousView = network ? network.getViewPosition() : null;
@@ -236,12 +253,15 @@ export class TourSidebarWebviewProvider
 						},
 						stabilization: {
 							iterations: 250,
-							fit: true
+							fit: false
 						}
 					},
 					edges: {
 						smooth: false
 					}
+				});
+				network.once('stabilized', () => {
+					network.setOptions({ physics: false });
 				});
 				network.on('click', params => {
 					if (params.nodes && params.nodes.length > 0) {
@@ -249,6 +269,7 @@ export class TourSidebarWebviewProvider
 					}
 				});
 			} else {
+				network.setOptions({ physics: false });
 				network.setData(data);
 				Object.entries(previousPositions).forEach(([id, pos]) => {
 					network.moveNode(id, pos.x, pos.y);
@@ -266,7 +287,7 @@ export class TourSidebarWebviewProvider
 		window.addEventListener('message', event => {
 			const message = event.data;
 			if (!message || message.type !== 'update') return;
-			statusEl.textContent = \`Status: \${message.status} | Background: \${message.showBackground ? 'on' : 'off'} | \${message.stepLabel}\`;
+			statusEl.textContent = \`Status: \${message.status} | Background: \${message.showBackground ? 'on' : 'off'} | Globals: \${message.showGlobals ? 'on' : 'off'} | \${message.stepLabel}\`;
 			renderGraph(message.graph, message.currentId);
 		});
 	</script>
@@ -291,4 +312,20 @@ function getNonce(): string {
 		text += possible.charAt(Math.floor(Math.random() * possible.length));
 	}
 	return text;
+}
+
+function applyGlobalVisibility(
+	graph: ReturnType<typeof buildTourGraph>,
+	showGlobals: boolean
+): ReturnType<typeof buildTourGraph> {
+	if (showGlobals) {
+		return graph;
+	}
+	const nodes = graph.nodes.map(node =>
+		node.kind === 'global' ? { ...node, hidden: true } : node
+	);
+	return {
+		...graph,
+		nodes,
+	};
 }

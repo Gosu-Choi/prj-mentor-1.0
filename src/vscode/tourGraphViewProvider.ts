@@ -59,7 +59,10 @@ export class TourGraphViewProvider
 			return;
 		}
 		const state = this.controller.getState();
-		const graph = buildTourGraph(state.steps);
+		const graph = applyGlobalVisibility(
+			buildTourGraph(state.steps),
+			state.showGlobals
+		);
 		this.view.webview.postMessage({
 			type: 'updateGraph',
 			graph,
@@ -103,6 +106,9 @@ export class TourGraphViewProvider
 		}
 		.node.definition rect {
 			stroke: var(--vscode-charts-orange, #f59e0b);
+		}
+		.node.global rect {
+			stroke: #22c55e;
 		}
 		.node.active rect {
 			stroke-width: 2px;
@@ -167,6 +173,9 @@ export class TourGraphViewProvider
 			}
 
 			for (const node of graph.nodes) {
+				if (node.hidden) {
+					continue;
+				}
 				const pos = positions.get(node.id);
 				if (!pos) continue;
 				const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -214,4 +223,27 @@ function getNonce(): string {
 		text += possible.charAt(Math.floor(Math.random() * possible.length));
 	}
 	return text;
+}
+
+function applyGlobalVisibility(
+	graph: ReturnType<typeof buildTourGraph>,
+	showGlobals: boolean
+): ReturnType<typeof buildTourGraph> {
+	if (showGlobals) {
+		return graph;
+	}
+	const nodes = graph.nodes.map(node =>
+		node.kind === 'global' ? { ...node, hidden: true } : node
+	);
+	const hiddenIds = new Set(
+		nodes.filter(node => node.hidden).map(node => node.id)
+	);
+	const edges = graph.edges.filter(
+		edge => !hiddenIds.has(edge.from) && !hiddenIds.has(edge.to)
+	);
+	return {
+		...graph,
+		nodes,
+		edges,
+	};
 }

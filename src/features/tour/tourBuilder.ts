@@ -28,7 +28,17 @@ export async function buildTourStepsWithExplanations(
 }
 
 function reorderMainSteps(steps: TourStep[]): TourStep[] {
-	return orderByGraph(steps);
+	const globals = steps.filter(isGlobalStep);
+	const nonGlobals = steps.filter(step => !isGlobalStep(step));
+	const orderedGlobals = [...globals].sort((a, b) => {
+		const aTarget = a.target as { filePath: string; range: { startLine: number } };
+		const bTarget = b.target as { filePath: string; range: { startLine: number } };
+		if (aTarget.filePath !== bTarget.filePath) {
+			return aTarget.filePath.localeCompare(bTarget.filePath);
+		}
+		return aTarget.range.startLine - bTarget.range.startLine;
+	});
+	return [...orderedGlobals, ...orderByGraph(nonGlobals)];
 }
 
 function stepOrderingKey(step: TourStep): {
@@ -40,7 +50,7 @@ function stepOrderingKey(step: TourStep): {
 	const diffText = 'diffText' in target ? target.diffText ?? '' : '';
 	const explicitKind =
 		'target' in step && 'changeKind' in (step.target as object)
-			? (step.target as { changeKind?: 'definition' | 'operation' })
+			? (step.target as { changeKind?: 'definition' | 'operation' | 'global' })
 					.changeKind
 			: undefined;
 	const isDefinition =
@@ -60,7 +70,7 @@ type GraphNode = {
 	step: TourStep;
 	filePath: string;
 	startLine: number;
-	changeKind: 'definition' | 'operation' | 'unknown';
+	changeKind: 'definition' | 'operation' | 'global' | 'unknown';
 	definitionName?: string;
 };
 
@@ -69,7 +79,7 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 		const target = step.target as {
 			filePath: string;
 			range: { startLine: number };
-			changeKind?: 'definition' | 'operation';
+			changeKind?: 'definition' | 'operation' | 'global';
 			definitionName?: string;
 		};
 		return {
@@ -86,7 +96,11 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 
 	const defByFileAndName = new Map<string, GraphNode[]>();
 	for (const node of nodes) {
-		if (node.changeKind === 'definition' && node.definitionName) {
+		if (
+			(node.changeKind === 'definition' ||
+				node.changeKind === 'global') &&
+			node.definitionName
+		) {
 			const key = `${node.filePath}|${node.definitionName}`;
 			const list = defByFileAndName.get(key) ?? [];
 			list.push(node);
@@ -108,11 +122,11 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 			continue;
 		}
 
-		if (node.changeKind === 'definition') {
+		if (node.changeKind === 'definition' || node.changeKind === 'global') {
 			const linkedDefs: GraphNode[] = [];
-			const callNames = collectCallNames(target.relatedCalls, target.diffText);
-			for (const callName of callNames) {
-				const key = `${node.filePath}|${callName}`;
+			const relatedNames = collectRelatedNames(target);
+			for (const name of relatedNames) {
+				const key = `${node.filePath}|${name}`;
 				const defs = defByFileAndName.get(key) ?? [];
 				linkedDefs.push(...defs);
 			}
@@ -139,9 +153,9 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 			const defs = defByFileAndName.get(key) ?? [];
 			linkedDefs.push(...defs);
 		}
-		const callNames = collectCallNames(target.relatedCalls, target.diffText);
-		for (const callName of callNames) {
-			const key = `${node.filePath}|${callName}`;
+		const relatedNames = collectRelatedNames(target);
+		for (const name of relatedNames) {
+			const key = `${node.filePath}|${name}`;
 			const defs = defByFileAndName.get(key) ?? [];
 			linkedDefs.push(...defs);
 		}
@@ -160,6 +174,9 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 	const orderedComponents = components.sort((a, b) => {
 		const aKey = componentSortKey(nodes, a);
 		const bKey = componentSortKey(nodes, b);
+		if (aKey.hasGlobal !== bKey.hasGlobal) {
+			return aKey.hasGlobal ? -1 : 1;
+		}
 		if (aKey.hasOperation !== bKey.hasOperation) {
 			return aKey.hasOperation ? -1 : 1;
 		}
@@ -296,10 +313,10 @@ function topoSortComponent(
 }
 
 function compareNodes(a: GraphNode, b: GraphNode): number {
-	const aRank = a.changeKind === 'definition' ? 1 : 0;
-	const bRank = b.changeKind === 'definition' ? 1 : 0;
+	const aRank = a.changeKind === 'global' ? 2 : a.changeKind === 'definition' ? 1 : 0;
+	const bRank = b.changeKind === 'global' ? 2 : b.changeKind === 'definition' ? 1 : 0;
 	if (aRank !== bRank) {
-		return aRank - bRank;
+		return bRank - aRank;
 	}
 	if (a.filePath !== b.filePath) {
 		return a.filePath.localeCompare(b.filePath);
@@ -308,16 +325,28 @@ function compareNodes(a: GraphNode, b: GraphNode): number {
 }
 
 function componentSortKey(nodes: GraphNode[], component: number[]): {
+	hasGlobal: boolean;
 	hasOperation: boolean;
 	filePath: string;
 	startLine: number;
 } {
 	let best = nodes[component[0]];
+	let hasGlobal = best.changeKind === 'global';
 	let hasOperation = best.changeKind === 'operation';
 	for (const id of component) {
 		const node = nodes[id];
+		if (node.changeKind === 'global') {
+			hasGlobal = true;
+		}
 		if (node.changeKind === 'operation') {
 			hasOperation = true;
+		}
+		if (
+			node.changeKind === 'global' &&
+			best.changeKind !== 'global'
+		) {
+			best = node;
+			continue;
 		}
 		if (node.filePath < best.filePath) {
 			best = node;
@@ -331,6 +360,7 @@ function componentSortKey(nodes: GraphNode[], component: number[]): {
 		}
 	}
 	return {
+		hasGlobal,
 		hasOperation,
 		filePath: best.filePath,
 		startLine: best.startLine,
@@ -386,6 +416,87 @@ function collectCallNames(
 		}
 	}
 	return names;
+}
+
+function isGlobalStep(step: TourStep): boolean {
+	if (step.type !== 'main') {
+		return false;
+	}
+	if (!('diffText' in step.target)) {
+		return false;
+	}
+	return step.target.changeKind === 'global';
+}
+
+function collectRelatedNames(target: {
+	relatedCalls?: Array<{ name: string; qualifiedName?: string }>;
+	diffText?: string;
+}): Set<string> {
+	const names = collectCallNames(target.relatedCalls, target.diffText);
+	const identifiers = collectIdentifierNames(target.diffText);
+	for (const name of identifiers) {
+		names.add(name);
+	}
+	return names;
+}
+
+function collectIdentifierNames(diffText: string | undefined): Set<string> {
+	const names = new Set<string>();
+	if (!diffText) {
+		return names;
+	}
+	const lines = diffText.split(/\r?\n/);
+	for (const line of lines) {
+		if (!line.startsWith('+')) {
+			continue;
+		}
+		const text = sanitizeLine(line.slice(1));
+		const matches = text.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g);
+		for (const match of matches) {
+			const name = match[1];
+			if (isIgnoredIdentifier(name)) {
+				continue;
+			}
+			names.add(name);
+		}
+	}
+	return names;
+}
+
+function sanitizeLine(text: string): string {
+	return text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ' ');
+}
+
+function isIgnoredIdentifier(name: string): boolean {
+	if (!name) {
+		return true;
+	}
+	const keywords = new Set([
+		'if',
+		'for',
+		'while',
+		'return',
+		'const',
+		'let',
+		'var',
+		'function',
+		'class',
+		'def',
+		'async',
+		'await',
+		'new',
+		'import',
+		'from',
+		'export',
+		'as',
+		'this',
+		'self',
+		'true',
+		'false',
+		'null',
+		'undefined',
+	]);
+	return keywords.has(name);
 }
 
 function detectDefinitionChange(diffText: string): boolean {

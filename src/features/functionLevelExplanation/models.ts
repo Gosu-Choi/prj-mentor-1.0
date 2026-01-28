@@ -9,7 +9,8 @@ export interface ChangeUnit {
 	diffText: string;
 	symbolName?: string;
 	semanticGroupId?: string;
-	changeKind?: 'definition' | 'operation';
+	changeKind?: 'definition' | 'operation' | 'global';
+	changeType?: 'add' | 'remove' | 'modify' | 'unknown';
 	definitionName?: string;
 	definitionType?: string;
 	introducedDefinitions?: Array<{
@@ -46,6 +47,7 @@ export interface TourState {
 	currentIndex: number;
 	status: 'idle' | 'running' | 'paused' | 'completed';
 	showBackground: boolean;
+	showGlobals: boolean;
 }
 
 export interface ChangeUnitGroup {

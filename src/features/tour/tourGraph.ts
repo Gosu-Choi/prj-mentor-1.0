@@ -3,11 +3,12 @@ import { ChangeUnit, TourStep } from '../functionLevelExplanation/models';
 export interface TourGraphNode {
 	id: string;
 	index: number;
-	kind: 'operation' | 'definition' | 'unknown';
+	kind: 'operation' | 'definition' | 'global' | 'unknown';
 	label: string;
 	filePath: string;
 	startLine: number;
 	endLine: number;
+	hidden?: boolean;
 }
 
 export interface TourGraphEdge {
@@ -33,7 +34,9 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 		const label =
 			kind === 'definition'
 				? target.definitionName ?? target.symbolName ?? 'Definition'
-				: target.symbolName ?? 'Operation';
+				: kind === 'global'
+					? target.definitionName ?? target.symbolName ?? 'Global'
+					: target.symbolName ?? 'Operation';
 		const node: TourGraphNode = {
 			id: step.id,
 			index: i,
@@ -49,7 +52,7 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 
 	const defByFileAndName = new Map<string, TourGraphNode[]>();
 	for (const node of nodes) {
-		if (node.kind !== 'definition') {
+		if (node.kind !== 'definition' && node.kind !== 'global') {
 			continue;
 		}
 		const key = `${node.filePath}|${node.label}`;
@@ -79,12 +82,9 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 					});
 				}
 			}
-			const callNames = collectCallNames(
-				target.relatedCalls,
-				target.diffText
-			);
-			for (const callName of callNames) {
-				const key = `${target.filePath}|${callName}`;
+			const relatedNames = collectRelatedNames(target);
+			for (const name of relatedNames) {
+				const key = `${target.filePath}|${name}`;
 				const defs = defByFileAndName.get(key) ?? [];
 				for (const defNode of defs) {
 					edges.push({
@@ -98,12 +98,9 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 		}
 
 		if (fromNode.kind === 'definition') {
-			const callNames = collectCallNames(
-				target.relatedCalls,
-				target.diffText
-			);
-			for (const callName of callNames) {
-				const key = `${target.filePath}|${callName}`;
+			const relatedNames = collectRelatedNames(target);
+			for (const name of relatedNames) {
+				const key = `${target.filePath}|${name}`;
 				const defs = defByFileAndName.get(key) ?? [];
 				for (const defNode of defs) {
 					if (defNode.id === fromId) {
@@ -178,4 +175,72 @@ function collectCallNames(
 		}
 	}
 	return names;
+}
+
+function collectRelatedNames(target: ChangeUnit): Set<string> {
+	const names = collectCallNames(target.relatedCalls, target.diffText);
+	const identifierNames = collectIdentifierNames(target.diffText);
+	for (const name of identifierNames) {
+		names.add(name);
+	}
+	return names;
+}
+
+function collectIdentifierNames(diffText: string | undefined): Set<string> {
+	const names = new Set<string>();
+	if (!diffText) {
+		return names;
+	}
+	const lines = diffText.split(/\r?\n/);
+	for (const line of lines) {
+		if (!line.startsWith('+')) {
+			continue;
+		}
+		const text = sanitizeLine(line.slice(1));
+		const matches = text.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g);
+		for (const match of matches) {
+			const name = match[1];
+			if (isIgnoredIdentifier(name)) {
+				continue;
+			}
+			names.add(name);
+		}
+	}
+	return names;
+}
+
+function sanitizeLine(text: string): string {
+	return text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ' ');
+}
+
+function isIgnoredIdentifier(name: string): boolean {
+	if (!name) {
+		return true;
+	}
+	const keywords = new Set([
+		'if',
+		'for',
+		'while',
+		'return',
+		'const',
+		'let',
+		'var',
+		'function',
+		'class',
+		'def',
+		'async',
+		'await',
+		'new',
+		'import',
+		'from',
+		'export',
+		'as',
+		'this',
+		'self',
+		'true',
+		'false',
+		'null',
+		'undefined',
+	]);
+	return keywords.has(name);
 }

@@ -147,6 +147,13 @@ function buildDiffTitle(step: TourStep): string {
 
 	const target = step.target as ChangeUnit;
 	const changeKind = target.changeKind ?? 'operation';
+	if (changeKind === 'global') {
+		const name =
+			target.definitionName ??
+			target.symbolName ??
+			'Global';
+		return `MENTOR: Global Variable Explanation / ${name}`;
+	}
 	if (changeKind === 'definition') {
 		const name =
 			target.definitionName ??
@@ -168,6 +175,13 @@ function buildCommentLabel(step: TourStep): string {
 
 	const target = step.target as ChangeUnit;
 	const changeKind = target.changeKind ?? 'operation';
+	if (changeKind === 'global') {
+		const name =
+			target.definitionName ??
+			target.symbolName ??
+			'Global';
+		return `MENTOR: Global Variable Explanation / ${name}`;
+	}
 	if (changeKind === 'definition') {
 		const name =
 			target.definitionName ??

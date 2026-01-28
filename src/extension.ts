@@ -120,6 +120,10 @@ export function activate(context: vscode.ExtensionContext) {
 		'mentor.toggleBackgroundTour',
 		() => controller.toggleShowBackground()
 	);
+	const toggleGlobalsCommand = vscode.commands.registerCommand(
+		'mentor.toggleGlobals',
+		() => controller.toggleShowGlobals()
+	);
 
 	const showDebugCommand = vscode.commands.registerCommand(
 		'mentor.showDebugInfo',
@@ -134,6 +138,7 @@ export function activate(context: vscode.ExtensionContext) {
 		openSidebarCommand,
 		clearExplanationsCommand,
 		toggleBackgroundCommand,
+		toggleGlobalsCommand,
 		showDebugCommand,
 		tourUi,
 		tourSidebarProvider,
