@@ -159,7 +159,10 @@ export class TourSidebarWebviewProvider
 			border: 1px solid var(--vscode-input-border);
 			border-radius: 6px;
 			padding: 6px;
-			height: 320px;
+			height: min(70vh, 520px);
+			min-height: 260px;
+			resize: vertical;
+			overflow: hidden;
 		}
 		#graph {
 			width: 100%;
@@ -190,6 +193,9 @@ export class TourSidebarWebviewProvider
 		const graphEl = document.getElementById('graph');
 		let network = null;
 		let currentGraph = null;
+		let groupDragActive = false;
+		let groupDragNodes = [];
+		let groupDragLast = null;
 
 		document.getElementById('start').addEventListener('click', () => vscode.postMessage({ type: 'start' }));
 		document.getElementById('stop').addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
@@ -277,6 +283,56 @@ export class TourSidebarWebviewProvider
 						vscode.postMessage({ type: 'selectStep', id: params.nodes[0] });
 					}
 				});
+				network.on('oncontext', params => {
+					if (!params || !params.event) return;
+					params.event.preventDefault();
+					const nodeId = params.nodes && params.nodes.length > 0
+						? params.nodes[0]
+						: null;
+					if (!nodeId) {
+						groupDragActive = false;
+						groupDragNodes = [];
+						groupDragLast = null;
+						return;
+					}
+					groupDragNodes = buildConnectedGroup(nodeId, currentGraph);
+					groupDragActive = groupDragNodes.length > 0;
+					groupDragLast = params.pointer?.canvas ?? null;
+					if (groupDragActive) {
+						network.selectNodes(groupDragNodes, true);
+					}
+				});
+				network.on('mousemove', params => {
+					if (!groupDragActive || !groupDragLast) return;
+					const buttons = params.event?.buttons ?? 0;
+					if ((buttons & 2) !== 2) return;
+					const next = params.pointer?.canvas;
+					if (!next) return;
+					const dx = next.x - groupDragLast.x;
+					const dy = next.y - groupDragLast.y;
+					if (dx === 0 && dy === 0) return;
+					groupDragLast = next;
+					groupDragNodes.forEach(id => {
+						const pos = network.getPositions([id])[id];
+						if (pos) {
+							network.moveNode(id, pos.x + dx, pos.y + dy);
+						}
+					});
+				});
+				network.on('mouseup', () => {
+					groupDragActive = false;
+					groupDragNodes = [];
+					groupDragLast = null;
+				});
+				graphEl.addEventListener('contextmenu', event => {
+					event.preventDefault();
+				});
+				document.addEventListener('mouseup', event => {
+					if (event.button !== 2) return;
+					groupDragActive = false;
+					groupDragNodes = [];
+					groupDragLast = null;
+				});
 			} else {
 				network.setOptions({ physics: false });
 				network.setData(data);
@@ -291,6 +347,31 @@ export class TourSidebarWebviewProvider
 					});
 				}
 			}
+		}
+
+		function buildConnectedGroup(nodeId, graph) {
+			if (!graph || !graph.edges) return [nodeId];
+			const neighbors = new Map();
+			graph.edges.forEach(edge => {
+				if (!neighbors.has(edge.from)) neighbors.set(edge.from, new Set());
+				if (!neighbors.has(edge.to)) neighbors.set(edge.to, new Set());
+				neighbors.get(edge.from).add(edge.to);
+				neighbors.get(edge.to).add(edge.from);
+			});
+			const visited = new Set([nodeId]);
+			const queue = [nodeId];
+			while (queue.length > 0) {
+				const current = queue.shift();
+				const nexts = neighbors.get(current);
+				if (!nexts) continue;
+				nexts.forEach(next => {
+					if (!visited.has(next)) {
+						visited.add(next);
+						queue.push(next);
+					}
+				});
+			}
+			return Array.from(visited);
 		}
 
 
