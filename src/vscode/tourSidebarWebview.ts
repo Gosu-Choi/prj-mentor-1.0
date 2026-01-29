@@ -8,6 +8,9 @@ export class TourSidebarWebviewProvider
 	implements vscode.WebviewViewProvider, vscode.Disposable
 {
 	private readonly disposables: vscode.Disposable[] = [];
+	private readonly debugChannel = vscode.window.createOutputChannel(
+		'MENTOR Graph Debug'
+	);
 	private view?: vscode.WebviewView;
 	private unsubscribe?: () => void;
 
@@ -60,6 +63,9 @@ export class TourSidebarWebviewProvider
 				case 'debug':
 					await vscode.commands.executeCommand('mentor.showDebugInfo');
 					break;
+				case 'debugGraph':
+					this.showGraphDebug(message);
+					break;
 				case 'selectStep':
 					if (typeof message.id === 'string') {
 						this.controller.jumpToStep(message.id);
@@ -80,6 +86,7 @@ export class TourSidebarWebviewProvider
 		}
 		this.disposables.length = 0;
 		this.unsubscribe?.();
+		this.debugChannel.dispose();
 	}
 
 	private update(): void {
@@ -89,7 +96,10 @@ export class TourSidebarWebviewProvider
 		const state = this.controller.getState();
 		const step = this.controller.getCurrentStep();
 		const graph = applyGlobalVisibility(
-			buildTourGraph(state.steps),
+			applyOverallVisibility(
+				buildTourGraph(this.controller.getGraphSteps()),
+				state.overallMode
+			),
 			state.showGlobals
 		);
 		this.view.webview.postMessage({
@@ -238,6 +248,7 @@ export class TourSidebarWebviewProvider
 		let network = null;
 		let currentGraph = null;
 		const savedPositionsByKey = new Map();
+		let lastNodeKeyById = new Map();
 		let groupDragActive = false;
 		let groupDragNodes = [];
 		let groupDragLast = null;
@@ -250,16 +261,40 @@ export class TourSidebarWebviewProvider
 		document.getElementById('toggleGlobals').addEventListener('click', () => vscode.postMessage({ type: 'toggleGlobals' }));
 		document.getElementById('toggleOverall').addEventListener('click', () => vscode.postMessage({ type: 'toggleOverall' }));
 		document.getElementById('clear').addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
-		document.getElementById('debug').addEventListener('click', () => vscode.postMessage({ type: 'debug' }));
+		document.getElementById('debug').addEventListener('click', () => {
+			if (network && currentGraph) {
+				const positions = network.getPositions();
+				const nodes = (currentGraph.nodes || []).map(node => {
+					const pos = positions[node.id] || {};
+					return {
+						id: node.id,
+						key: buildNodeKey(node),
+						layoutKey: node.layoutKey,
+						identityKey: node.identityKey,
+						label: node.label,
+						filePath: node.filePath,
+						isOverall: node.isOverall,
+						hidden: node.hidden === true,
+						x: typeof pos.x === 'number' ? pos.x : node.x,
+						y: typeof pos.y === 'number' ? pos.y : node.y
+					};
+				});
+				vscode.postMessage({
+					type: 'debugGraph',
+					nodes,
+					total: nodes.length
+				});
+			}
+			vscode.postMessage({ type: 'debug' });
+		});
 
 		function renderGraph(graph, currentId) {
 			currentGraph = graph;
 			if (network) {
 				const positions = network.getPositions();
-				graph.nodes.forEach(node => {
-					const pos = positions[node.id];
-					if (!pos) return;
-					const key = buildNodeKey(node);
+				Object.entries(positions).forEach(([id, pos]) => {
+					const key = lastNodeKeyById.get(id);
+					if (!key) return;
 					savedPositionsByKey.set(key, { x: pos.x, y: pos.y });
 				});
 			}
@@ -267,36 +302,22 @@ export class TourSidebarWebviewProvider
 			const visibleIds = new Set(
 				graph.nodes.filter(node => !node.hidden).map(node => node.id)
 			);
-			const nodesWithPos = [];
-			const nodesWithoutPos = [];
-			graph.nodes.forEach(node => {
-				const key = buildNodeKey(node);
-				const pos = savedPositionsByKey.get(key);
-				if (pos) {
-					nodesWithPos.push({ node, pos });
-				} else {
-					nodesWithoutPos.push({ node, key });
-				}
-			});
-
-			const bounds = getBounds(nodesWithPos.map(item => item.pos));
-			const fallback = buildFallbackPositions(
-				nodesWithoutPos.length,
-				bounds
-			);
-			nodesWithoutPos.forEach((entry, index) => {
-				const pos = fallback[index];
-				savedPositionsByKey.set(entry.key, pos);
-			});
-
+			const nodeKeyById = new Map();
 			const nodes = graph.nodes.map(node => {
 				const key = buildNodeKey(node);
+				nodeKeyById.set(node.id, key);
 				const pos = savedPositionsByKey.get(key);
 				const isCurrent = node.id === currentId || (node.steps || []).some(step => step.id === currentId);
 				return {
 					id: node.id,
 					label: node.kind === 'operation' && !node.isOverall ? '' : node.label,
 					hidden: node.hidden === true,
+					filePath: node.filePath,
+					elementKind: node.elementKind,
+					qualifiedName: node.qualifiedName,
+					isOverall: node.isOverall,
+					identityKey: node.identityKey,
+					layoutKey: node.layoutKey,
 					color: node.kind === 'definition'
 						? '#f59e0b'
 						: node.kind === 'global'
@@ -310,6 +331,7 @@ export class TourSidebarWebviewProvider
 					size: node.id === currentId ? 14 : 10,
 					x: pos ? pos.x : undefined,
 					y: pos ? pos.y : undefined,
+					fixed: false,
 					steps: node.steps
 				};
 			});
@@ -323,7 +345,6 @@ export class TourSidebarWebviewProvider
 				}));
 			currentGraph = { nodes, edges };
 
-			const previousPositions = network ? network.getPositions() : {};
 			const previousView = network ? network.getViewPosition() : null;
 			const previousScale = network ? network.getScale() : null;
 			const data = {
@@ -372,6 +393,15 @@ export class TourSidebarWebviewProvider
 						const stepId = node?.steps?.[0]?.id ?? nodeId;
 						vscode.postMessage({ type: 'selectStep', id: stepId });
 					}
+				});
+				network.on('dragEnd', params => {
+					if (!params || !params.nodes) return;
+					const positions = network.getPositions(params.nodes);
+					Object.entries(positions).forEach(([id, pos]) => {
+						const key = nodeKeyById.get(id);
+						if (!key) return;
+						savedPositionsByKey.set(key, { x: pos.x, y: pos.y });
+					});
 				});
 				network.on('oncontext', params => {
 					if (!params || !params.event) return;
@@ -426,9 +456,6 @@ export class TourSidebarWebviewProvider
 			} else {
 				network.setOptions({ physics: { enabled: false } });
 				network.setData(data);
-				Object.entries(previousPositions).forEach(([id, pos]) => {
-					network.moveNode(id, pos.x, pos.y);
-				});
 				if (previousView && previousScale) {
 					network.moveTo({
 						position: previousView,
@@ -437,6 +464,7 @@ export class TourSidebarWebviewProvider
 					});
 				}
 			}
+			lastNodeKeyById = nodeKeyById;
 		}
 
 		function showStepList(steps) {
@@ -467,46 +495,17 @@ export class TourSidebarWebviewProvider
 		}
 
 		function buildNodeKey(node) {
+			if (node.layoutKey) {
+				return node.layoutKey;
+			}
+			if (node.identityKey) {
+				return node.identityKey;
+			}
 			const label = node.label ?? '';
 			const elementKind = node.elementKind ?? '';
 			const qualified = node.qualifiedName ?? '';
 			const identity = qualified || label;
 			return node.filePath + '|' + elementKind + '|' + identity;
-		}
-
-		function getBounds(positions) {
-			if (!positions.length) {
-				return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
-			}
-			let minX = positions[0].x;
-			let maxX = positions[0].x;
-			let minY = positions[0].y;
-			let maxY = positions[0].y;
-			positions.forEach(pos => {
-				minX = Math.min(minX, pos.x);
-				maxX = Math.max(maxX, pos.x);
-				minY = Math.min(minY, pos.y);
-				maxY = Math.max(maxY, pos.y);
-			});
-			return { minX, maxX, minY, maxY };
-		}
-
-		function buildFallbackPositions(count, bounds) {
-			const positions = [];
-			if (count <= 0) return positions;
-			const centerX = (bounds.minX + bounds.maxX) / 2;
-			const centerY = (bounds.minY + bounds.maxY) / 2;
-			const baseRadius = 120;
-			const step = 32;
-			for (let i = 0; i < count; i += 1) {
-				const angle = i * 0.9;
-				const radius = baseRadius + i * step;
-				positions.push({
-					x: centerX + Math.cos(angle) * radius,
-					y: centerY + Math.sin(angle) * radius
-				});
-			}
-			return positions;
 		}
 
 		function buildConnectedGroup(nodeId, graph) {
@@ -545,6 +544,42 @@ export class TourSidebarWebviewProvider
 </body>
 </html>`;
 	}
+
+	private showGraphDebug(message: {
+		nodes?: Array<{
+			id: string;
+			key?: string;
+			layoutKey?: string;
+			identityKey?: string;
+			label?: string;
+			filePath?: string;
+			isOverall?: boolean;
+			hidden?: boolean;
+			x?: number;
+			y?: number;
+		}>;
+		total?: number;
+	}): void {
+		const nodes = message.nodes ?? [];
+		this.debugChannel.clear();
+		this.debugChannel.appendLine('MENTOR Graph Debug');
+		this.debugChannel.appendLine(`Nodes: ${message.total ?? nodes.length}`);
+		for (const node of nodes) {
+			const key = node.key ?? '';
+			const layoutKey = node.layoutKey ?? '';
+			const identityKey = node.identityKey ?? '';
+			const label = node.label ?? '';
+			const file = node.filePath ?? '';
+			const overall = node.isOverall ? 'overall' : 'diff';
+			const hidden = node.hidden ? 'hidden' : 'visible';
+			const x = typeof node.x === 'number' ? node.x.toFixed(2) : 'n/a';
+			const y = typeof node.y === 'number' ? node.y.toFixed(2) : 'n/a';
+			this.debugChannel.appendLine(
+				`${node.id} | ${key} | ${layoutKey} | ${identityKey} | ${file} | ${label} | ${overall} | ${hidden} | (${x}, ${y})`
+			);
+		}
+		this.debugChannel.show(true);
+	}
 }
 
 function formatStepLabel(
@@ -575,6 +610,21 @@ function applyGlobalVisibility(
 	const nodes = graph.nodes.map(node =>
 		node.elementKind === 'global' ? { ...node, hidden: true } : node
 	);
+	return {
+		...graph,
+		nodes,
+	};
+}
+
+function applyOverallVisibility(
+	graph: ReturnType<typeof buildTourGraph>,
+	overallMode: boolean
+): ReturnType<typeof buildTourGraph> {
+	const nodes = graph.nodes.map(node => {
+		const isOverall = node.isOverall === true;
+		const hidden = overallMode ? !isOverall : isOverall;
+		return hidden ? { ...node, hidden: true } : node;
+	});
 	return {
 		...graph,
 		nodes,

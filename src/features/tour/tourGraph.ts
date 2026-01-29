@@ -10,8 +10,11 @@ export interface TourGraphNode {
 	endLine: number;
 	elementKind?: ChangeUnit['elementKind'];
 	qualifiedName?: string;
+	containerName?: string;
 	isOverall?: boolean;
 	hidden?: boolean;
+	identityKey?: string;
+	layoutKey?: string;
 	steps?: Array<{
 		id: string;
 		label: string;
@@ -74,6 +77,16 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 			let node = opGroupByKey.get(key);
 			if (!node) {
 				const label = target.symbolName ?? target.definitionName ?? 'Operation';
+				const identityKey = buildIdentityKey(
+					'operation',
+					target.filePath,
+					target.qualifiedName ?? label,
+					target.segmentId ?? target.definitionName
+				);
+				const layoutKey = buildLayoutKey(
+					target.filePath,
+					resolveLayoutLabel(target)
+				);
 				node = {
 					id: `op:${key}`,
 					index: i,
@@ -84,7 +97,10 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 					endLine: target.range.endLine,
 					elementKind: target.elementKind,
 					qualifiedName: target.qualifiedName,
+					containerName: target.containerName,
 					isOverall: target.isOverall,
+					identityKey,
+					layoutKey,
 				};
 				opGroupByKey.set(key, node);
 				nodes.push(node);
@@ -112,6 +128,15 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 				: kind === 'global'
 					? target.definitionName ?? target.symbolName ?? 'Global'
 					: target.symbolName ?? 'Operation';
+		const identityKey = buildIdentityKey(
+			kind,
+			target.filePath,
+			target.qualifiedName ?? label
+		);
+		const layoutKey = buildLayoutKey(
+			target.filePath,
+			resolveLayoutLabel(target)
+		);
 		const node: TourGraphNode = {
 			id: step.id,
 			index: i,
@@ -122,7 +147,10 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 			endLine: target.range.endLine,
 			elementKind: target.elementKind ?? (kind === 'global' ? 'global' : undefined),
 			qualifiedName: target.qualifiedName,
+			containerName: target.containerName,
 			isOverall: target.isOverall,
+			identityKey,
+			layoutKey,
 			steps: [
 				{
 					id: step.id,
@@ -271,6 +299,39 @@ export function buildTourGraph(steps: TourStep[]): TourGraph {
 		nodes,
 		edges,
 	};
+}
+
+function buildIdentityKey(
+	kind: TourGraphNode['kind'],
+	filePath: string,
+	label: string,
+	suffix?: string
+): string {
+	const parts = [
+		kind,
+		filePath,
+		label,
+		suffix ?? '',
+	];
+	return parts.filter(Boolean).join('|');
+}
+
+function buildLayoutKey(filePath: string, label: string): string {
+	const parts = [filePath, label];
+	return parts.filter(Boolean).join('|');
+}
+
+function resolveLayoutLabel(target: ChangeUnit): string {
+	if (target.qualifiedName) {
+		return target.qualifiedName;
+	}
+	if (target.containerName && target.definitionName) {
+		return `${target.containerName}.${target.definitionName}`;
+	}
+	if (target.containerName && target.symbolName) {
+		return `${target.containerName}.${target.symbolName}`;
+	}
+	return target.definitionName ?? target.symbolName ?? '';
 }
 
 function resolveDefinitions(

@@ -156,6 +156,8 @@ export async function splitChangeUnitsByDefinitions(
 				def.type === 'global-variable'
 					? 'global'
 					: 'definition';
+			const containerName =
+				def.type === 'method' ? deriveContainerName(def.qualifiedName) : undefined;
 			result.push({
 				...unit,
 				range: { ...def.range },
@@ -173,6 +175,8 @@ export async function splitChangeUnitsByDefinitions(
 							: def.type === 'method'
 								? 'method'
 								: 'function',
+				qualifiedName: def.qualifiedName,
+				containerName,
 			});
 		}
 
@@ -395,6 +399,7 @@ type DefinitionHit = {
 	name: string;
 	type: string;
 	range: LineRange;
+	qualifiedName?: string;
 };
 
 function findDefinitions(
@@ -437,6 +442,7 @@ function findDefinitions(
 				hit.type === 'variable' && isGlobal
 					? 'global-variable'
 					: resolved.kind ?? hit.type;
+			const qualifiedName = resolved.qualifiedName;
 
 			if (type === 'global-variable') {
 				const variableRange = resolveVariableRange(
@@ -462,6 +468,7 @@ function findDefinitions(
 				name: hit.name,
 				type,
 				range,
+				qualifiedName,
 			});
 		}
 	}
@@ -485,6 +492,7 @@ function findDefinitions(
 			name: def.name,
 			type,
 			range: def.range,
+			qualifiedName: def.qualifiedName,
 		});
 	}
 	return results;
@@ -709,7 +717,7 @@ function resolveDefinitionRange(
 	name: string,
 	lineNumber: number,
 	expectedType?: string
-): { range: LineRange; kind?: string; isGlobal?: boolean } {
+): { range: LineRange; kind?: string; qualifiedName?: string; isGlobal?: boolean } {
 	const expectedKind = expectedType
 		? normalizeDefinitionKind(expectedType)
 		: undefined;
@@ -726,11 +734,19 @@ function resolveDefinitionRange(
 			const currSpan = current.range.endLine - current.range.startLine;
 			return currSpan < prevSpan ? current : prev;
 		});
-		return { range: best.range, kind: best.kind };
+		return {
+			range: best.range,
+			kind: best.kind,
+			qualifiedName: best.qualifiedName,
+		};
 	}
 	const named = definitions.filter(def => def.name === name);
 	if (named.length > 0) {
-		return { range: named[0].range, kind: named[0].kind };
+		return {
+			range: named[0].range,
+			kind: named[0].kind,
+			qualifiedName: named[0].qualifiedName,
+		};
 	}
 	return { range: { startLine: lineNumber, endLine: lineNumber } };
 }
@@ -748,6 +764,17 @@ function buildSegmentId(
 	definition: DefinitionRange
 ): string {
 	return `${filePath}|${definition.range.startLine}-${definition.range.endLine}`;
+}
+
+function deriveContainerName(qualifiedName: string | undefined): string | undefined {
+	if (!qualifiedName) {
+		return undefined;
+	}
+	const parts = qualifiedName.split('.');
+	if (parts.length < 2) {
+		return undefined;
+	}
+	return parts.slice(0, -1).join('.');
 }
 
 function findEnclosingDefinitionRange(

@@ -4,6 +4,7 @@ type Listener = (state: TourState) => void;
 
 export class TourController {
 	private steps: TourStep[] = [];
+	private graphSteps: TourStep[] = [];
 	private currentIndex = -1;
 	private status: TourState['status'] = 'idle';
 	private showBackground = true;
@@ -11,8 +12,9 @@ export class TourController {
 	private overallMode = false;
 	private listeners = new Set<Listener>();
 
-	setSteps(steps: TourStep[]): void {
+	setSteps(steps: TourStep[], graphSteps?: TourStep[]): void {
 		this.steps = steps;
+		this.graphSteps = graphSteps ?? steps;
 		this.currentIndex = -1;
 		this.status = 'idle';
 		this.emit();
@@ -116,6 +118,10 @@ export class TourController {
 			return undefined;
 		}
 		return this.steps[this.currentIndex];
+	}
+
+	getGraphSteps(): TourStep[] {
+		return this.graphSteps.length > 0 ? this.graphSteps : this.steps;
 	}
 
 	onDidChange(listener: Listener): () => void {

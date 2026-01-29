@@ -12,6 +12,7 @@ import { ExplanationGenerator } from './features/functionLevelExplanation/explan
 import { buildStepKey, ExplanationStore } from './features/functionLevelExplanation/explanationStore';
 import { buildTourSteps, buildTourStepsWithExplanations } from './features/tour/tourBuilder';
 import { TourController } from './features/tour/tourController';
+import { ChangeUnit, ChangeUnitGroup, TourStep } from './features/functionLevelExplanation/models';
 import { MentorGitProvider } from './vscode/mentorGitProvider';
 import { TourUi } from './vscode/tourUi';
 import { BackgroundContextBuilder } from './features/background/backgroundContextBuilder';
@@ -136,11 +137,13 @@ export function activate(context: vscode.ExtensionContext) {
 			const next = !controller.getState().overallMode;
 			controller.setOverallMode(next);
 			await context.workspaceState.update('mentor.overallMode', next);
-			const intent = context.workspaceState.get<string>(
-				'mentor.intent',
-				''
-			);
-			await startTour(intent);
+			if (controller.getGraphSteps().length === 0) {
+				const intent = context.workspaceState.get<string>(
+					'mentor.intent',
+					''
+				);
+				await startTour(intent);
+			}
 		}
 	);
 
@@ -168,89 +171,51 @@ export function activate(context: vscode.ExtensionContext) {
 
 	async function startTour(intent?: string): Promise<void> {
 		try {
+			const diffArtifacts = await buildDiffArtifacts();
+			const overallSteps = await buildOverallSteps(
+				diffArtifacts.status === 'ok' ? diffArtifacts.changeUnits : undefined
+			);
+
 			if (controller.getState().overallMode) {
-				const files = await vscode.workspace.findFiles(
-					'**/*.{ts,tsx,js,jsx,py}',
-					'**/{node_modules,dist,out,.git}/**'
-				);
-				const filePaths = files.map(file =>
-					path.relative(workspaceRootUri.fsPath, file.fsPath)
-				);
-				const overallIndex = await buildOverallIndex(
-					workspaceRootUri.fsPath,
-					filePaths
-				);
-				if (overallIndex.units.length === 0) {
+				if (!overallSteps || overallSteps.length === 0) {
 					void vscode.window.showInformationMessage(
 						'No source files found for overall view.'
 					);
 					return;
 				}
-				const diffText = await getGitDiffAgainstHead(
-					workspaceRootUri.fsPath
-				);
-				if (diffText.trim()) {
-					const rawUnits = parseChangeUnitsFromDiff(
-						diffText,
-						workspaceRootUri.fsPath
-					);
-					const changeUnits = await splitChangeUnitsByDefinitions(
-						rawUnits,
-						workspaceRootUri.fsPath
-					);
-					applyChangesToOverall(overallIndex, changeUnits);
-				}
-				const steps = overallIndex.units.map((unit, index) => ({
-					id: `overall-${index + 1}`,
-					type: 'main' as const,
-					target: unit,
-					explanation: '',
-				}));
-				controller.setSteps(steps);
+				const diffGraphSteps = diffArtifacts.status === 'ok'
+					? buildTourSteps(diffArtifacts.groups)
+					: [];
+				const graphSteps = overallSteps.concat(diffGraphSteps);
+				controller.setSteps(overallSteps, graphSteps);
 				controller.start();
 				return;
 			}
-			const diffText = await getGitDiffAgainstHead(
-				workspaceRootUri.fsPath
-			);
-			if (!diffText.trim()) {
+
+			if (diffArtifacts.status === 'no-diff') {
 				void vscode.window.showInformationMessage(
 					'No git changes detected against HEAD.'
 				);
 				return;
 			}
-
-				const rawUnits = parseChangeUnitsFromDiff(
-					diffText,
-					workspaceRootUri.fsPath
-				);
-				const changeUnits = await splitChangeUnitsByDefinitions(
-					rawUnits,
-					workspaceRootUri.fsPath
-				);
-			if (changeUnits.length === 0) {
-				void vscode.window.showInformationMessage(
-					'No diff hunks could be mapped to files.'
-				);
+			if (diffArtifacts.status !== 'ok') {
 				return;
 			}
 
-			await backgroundBuilder.attachBackgroundRegions(changeUnits);
-
-				const groups = groupChangeUnits(changeUnits, {
-					workspaceRoot: workspaceRootUri.fsPath,
-				});
-
 			const stored = await explanationStore.load(intent);
 			if (stored.size > 0) {
-				const steps = buildTourSteps(groups);
+				const steps = buildTourSteps(diffArtifacts.groups);
 				for (const step of steps) {
 					const record = stored.get(buildStepKey(step));
 					if (record) {
 						step.explanation = record.explanation;
 					}
 				}
-				controller.setSteps(steps);
+				const graphSteps = [
+					...(overallSteps ?? []),
+					...steps,
+				];
+				controller.setSteps(steps, graphSteps);
 				controller.start();
 				return;
 			}
@@ -266,17 +231,17 @@ export function activate(context: vscode.ExtensionContext) {
 					if (apiKey) {
 						try {
 							const client = new OpenAI({ apiKey });
-								const generator =
-									new ExplanationGenerator(
-										client,
-										workspaceRootUri.fsPath,
-										{
-											model: 'gpt-4o',
-											maxFileContextChars: 12000,
-										}
-									);
+							const generator =
+								new ExplanationGenerator(
+									client,
+									workspaceRootUri.fsPath,
+									{
+										model: 'gpt-4o',
+										maxFileContextChars: 12000,
+									}
+								);
 							return await buildTourStepsWithExplanations(
-								groups,
+								diffArtifacts.groups,
 								generator,
 								intent
 							);
@@ -295,14 +260,18 @@ export function activate(context: vscode.ExtensionContext) {
 						);
 					}
 
-					return buildTourSteps(groups);
+					return buildTourSteps(diffArtifacts.groups);
 				}
 			);
 
-				await explanationStore.save(steps, intent);
-				await writeTourDebugLog(workspaceRootUri.fsPath, steps);
-				controller.setSteps(steps);
-				controller.start();
+			await explanationStore.save(steps, intent);
+			await writeTourDebugLog(workspaceRootUri.fsPath, steps);
+			const graphSteps = [
+				...(overallSteps ?? []),
+				...steps,
+			];
+			controller.setSteps(steps, graphSteps);
+			controller.start();
 		} catch (error) {
 			const message =
 				error instanceof Error
@@ -310,6 +279,77 @@ export function activate(context: vscode.ExtensionContext) {
 					: 'Failed to start MENTOR tour.';
 			void vscode.window.showErrorMessage(message);
 		}
+	}
+
+	async function buildDiffArtifacts(): Promise<{
+		status: 'ok' | 'no-diff' | 'no-hunks';
+		diffText: string;
+		changeUnits: ChangeUnit[];
+		groups: ChangeUnitGroup[];
+	}> {
+		const diffText = await getGitDiffAgainstHead(
+			workspaceRootUri.fsPath
+		);
+		if (!diffText.trim()) {
+			return {
+				status: 'no-diff',
+				diffText: '',
+				changeUnits: [],
+				groups: [],
+			};
+		}
+		const rawUnits = parseChangeUnitsFromDiff(
+			diffText,
+			workspaceRootUri.fsPath
+		);
+		const changeUnits = await splitChangeUnitsByDefinitions(
+			rawUnits,
+			workspaceRootUri.fsPath
+		);
+		if (changeUnits.length === 0) {
+			void vscode.window.showInformationMessage(
+				'No diff hunks could be mapped to files.'
+			);
+			return {
+				status: 'no-hunks',
+				diffText,
+				changeUnits: [],
+				groups: [],
+			};
+		}
+		await backgroundBuilder.attachBackgroundRegions(changeUnits);
+		const groups = groupChangeUnits(changeUnits, {
+			workspaceRoot: workspaceRootUri.fsPath,
+		});
+		return { status: 'ok', diffText, changeUnits, groups };
+	}
+
+	async function buildOverallSteps(
+		changeUnits?: ChangeUnit[]
+	): Promise<TourStep[] | null> {
+		const files = await vscode.workspace.findFiles(
+			'**/*.{ts,tsx,js,jsx,py}',
+			'**/{node_modules,dist,out,.git}/**'
+		);
+		const filePaths = files.map(file =>
+			path.relative(workspaceRootUri.fsPath, file.fsPath)
+		);
+		const overallIndex = await buildOverallIndex(
+			workspaceRootUri.fsPath,
+			filePaths
+		);
+		if (overallIndex.units.length === 0) {
+			return null;
+		}
+		if (changeUnits && changeUnits.length > 0) {
+			applyChangesToOverall(overallIndex, changeUnits);
+		}
+		return overallIndex.units.map((unit, index) => ({
+			id: `overall-${index + 1}`,
+			type: 'main' as const,
+			target: unit,
+			explanation: '',
+		}));
 	}
 }
 
