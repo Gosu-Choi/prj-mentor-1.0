@@ -188,7 +188,7 @@ function orderByGraph(steps: TourStep[]): TourStep[] {
 
 	const orderedSteps: TourStep[] = [];
 	for (const component of orderedComponents) {
-		const sorted = topoSortComponent(nodes, component, edges);
+		const sorted = orderComponentLeafFirstBfs(nodes, component, edges);
 		for (const nodeId of sorted) {
 			orderedSteps.push(nodes[nodeId].step);
 		}
@@ -322,6 +322,82 @@ function compareNodes(a: GraphNode, b: GraphNode): number {
 		return a.filePath.localeCompare(b.filePath);
 	}
 	return a.startLine - b.startLine;
+}
+
+function orderComponentLeafFirstBfs(
+	nodes: GraphNode[],
+	component: number[],
+	edges: Map<number, Set<number>>
+): number[] {
+	const componentSet = new Set(component);
+	const outEdges = new Map<number, number[]>();
+	const inDegree = new Map<number, number>();
+
+	for (const id of component) {
+		outEdges.set(id, []);
+		inDegree.set(id, 0);
+	}
+
+	for (const [from, tos] of edges.entries()) {
+		if (!componentSet.has(from)) {
+			continue;
+		}
+		for (const to of tos) {
+			if (!componentSet.has(to)) {
+				continue;
+			}
+			const list = outEdges.get(from);
+			if (list) {
+				list.push(to);
+			}
+			inDegree.set(to, (inDegree.get(to) ?? 0) + 1);
+		}
+	}
+
+	for (const list of outEdges.values()) {
+		list.sort((a, b) => compareNodes(nodes[a], nodes[b]));
+	}
+
+	const leaves = component.filter(id => (outEdges.get(id)?.length ?? 0) === 0);
+	leaves.sort((a, b) => compareNodes(nodes[a], nodes[b]));
+
+	const ordered: number[] = [];
+	const visited = new Set<number>();
+
+	for (const leaf of leaves) {
+		ordered.push(leaf);
+		visited.add(leaf);
+	}
+
+	const roots = component.filter(id => (inDegree.get(id) ?? 0) === 0);
+	roots.sort((a, b) => compareNodes(nodes[a], nodes[b]));
+	const queue = [...roots];
+
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (current === undefined) {
+			break;
+		}
+		if (!visited.has(current)) {
+			ordered.push(current);
+			visited.add(current);
+		}
+		const nexts = outEdges.get(current) ?? [];
+		for (const next of nexts) {
+			if (!visited.has(next)) {
+				queue.push(next);
+			}
+		}
+	}
+
+	const remaining = component.filter(id => !visited.has(id));
+	remaining.sort((a, b) => compareNodes(nodes[a], nodes[b]));
+	for (const id of remaining) {
+		ordered.push(id);
+		visited.add(id);
+	}
+
+	return ordered;
 }
 
 function componentSortKey(nodes: GraphNode[], component: number[]): {
