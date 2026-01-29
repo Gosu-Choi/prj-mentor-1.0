@@ -308,6 +308,13 @@ export class TourSidebarWebviewProvider
 				nodeKeyById.set(node.id, key);
 				const pos = savedPositionsByKey.get(key);
 				const isCurrent = node.id === currentId || (node.steps || []).some(step => step.id === currentId);
+				const color = node.kind === 'definition'
+					? '#f59e0b'
+					: node.kind === 'global'
+						? '#22c55e'
+						: node.kind === 'operation'
+							? '#3b82f6'
+							: '#6b7280';
 				return {
 					id: node.id,
 					label: node.kind === 'operation' && !node.isOverall ? '' : node.label,
@@ -318,13 +325,7 @@ export class TourSidebarWebviewProvider
 					isOverall: node.isOverall,
 					identityKey: node.identityKey,
 					layoutKey: node.layoutKey,
-					color: node.kind === 'definition'
-						? '#f59e0b'
-						: node.kind === 'global'
-							? '#22c55e'
-							: node.kind === 'operation'
-								? '#3b82f6'
-								: '#6b7280',
+					color,
 					font: { color: 'var(--vscode-foreground)', size: 11 },
 					borderWidth: isCurrent ? 2 : 1,
 					shape: 'dot',
@@ -335,12 +336,19 @@ export class TourSidebarWebviewProvider
 					steps: node.steps
 				};
 			});
+			const colorById = new Map(
+				nodes.map(node => [node.id, node.color])
+			);
 			const edges = graph.edges
 				.filter(edge => visibleIds.has(edge.from) && visibleIds.has(edge.to))
 				.map(edge => ({
 					from: edge.from,
 					to: edge.to,
-					color: edge.type === 'def-to-def' ? '#f59e0b' : '#3b82f6',
+					color: graph.nodes.find(node => node.id === edge.to && node.isOverall === true)
+						? colorById.get(edge.to)
+						: edge.type === 'def-to-def'
+							? '#f59e0b'
+							: '#3b82f6',
 					arrows: 'to'
 				}));
 			currentGraph = { nodes, edges };
